@@ -1,0 +1,7 @@
+# 本地核对产物，不进仓库
+_verify/
+_edge-profile*/
+_tools/portrait.jpg
+_tools/face_test.y4m
+_verify/shots/
+*.log

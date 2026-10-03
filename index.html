@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>五官镜像 · 你的表情，页面里的五官</title>
+<style>
+  :root {
+    --panel: rgba(20, 20, 28, 0.74);
+    --panel-line: rgba(255, 255, 255, 0.13);
+    --text: #f4f4f8;
+    --muted: #a8a8b8;
+    --accent: #ff8a5c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0d0d12; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  video#cam { position: fixed; width: 2px; height: 2px; opacity: 0; pointer-events: none; top: -10px; left: -10px; }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--panel-line);
+    border-radius: 16px;
+    backdrop-filter: blur(14px) saturate(1.2);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+  }
+
+  #panel {
+    position: fixed; top: 18px; left: 18px; width: 306px;
+    padding: 14px 14px 12px; z-index: 20; font-size: 13px;
+    max-height: calc(100% - 36px); overflow: auto;
+    transition: width .25s ease, padding .25s ease;
+  }
+  #panel.collapsed { width: 178px; padding: 10px 12px; }
+  #panel.collapsed .body { display: none; }
+  .brand { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
+  .brand b { font-size: 15px; letter-spacing: .5px; }
+  .brand span { font-size: 11px; color: var(--muted); }
+  .build { font-size: 10px; color: var(--muted); opacity: .75; margin: -3px 0 7px; font-family: Consolas, monospace; }
+  .status { font-size: 11.5px; color: var(--muted); margin: 6px 0 10px; line-height: 1.5; }
+  .status b { color: var(--text); font-weight: 600; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #666; margin-right: 6px; vertical-align: 1px; }
+  .dot.on { background: #45d18a; box-shadow: 0 0 8px #45d18a; }
+  .dot.warn { background: #ffb545; }
+  .dot.err { background: #ff5d5d; }
+
+  .field { margin-bottom: 10px; }
+  .field > label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 5px; letter-spacing: .3px; }
+  .seg { display: flex; gap: 4px; background: rgba(255,255,255,.06); padding: 3px; border-radius: 10px; }
+  .seg button {
+    flex: 1; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px;
+    padding: 6px 0; border-radius: 8px; cursor: pointer; transition: .15s;
+  }
+  .seg button:hover { color: var(--text); }
+  .seg button.active { background: rgba(255,255,255,.14); color: var(--text); font-weight: 600; }
+  .dots { display: flex; gap: 8px; }
+  .dots button {
+    width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; cursor: pointer;
+    padding: 0; position: relative; overflow: hidden;
+  }
+  .dots button.active { border-color: #fff; }
+  .dots button i { position: absolute; inset: 0; }
+  .dots button i:first-child { clip-path: inset(0 0 0 50%); }
+  input[type=range] { width: 100%; accent-color: var(--accent); height: 18px; }
+  select {
+    width: 100%; padding: 7px 8px; border-radius: 9px; font: inherit; font-size: 12px;
+    background: rgba(255,255,255,.08); color: var(--text); border: 1px solid var(--panel-line);
+  }
+  .actions { display: flex; gap: 6px; margin-top: 4px; }
+  .actions button {
+    flex: 1; padding: 8px 0; border-radius: 10px; border: 1px solid var(--panel-line);
+    background: rgba(255,255,255,.07); color: var(--text); font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .actions button:hover { background: rgba(255,255,255,.14); }
+  .note { margin-top: 10px; font-size: 10.5px; line-height: 1.55; color: var(--muted); }
+  .kbd { border: 1px solid var(--panel-line); border-radius: 4px; padding: 0 4px; font-size: 10px; }
+
+  #hint {
+    position: fixed; left: 50%; bottom: 9%; transform: translateX(-50%);
+    padding: 10px 18px; border-radius: 999px; font-size: 13.5px; z-index: 15;
+    background: rgba(20,20,28,.66); border: 1px solid var(--panel-line); color: #fff;
+    opacity: 0; transition: opacity .3s; pointer-events: none; backdrop-filter: blur(8px);
+    text-align: center; max-width: 80vw;
+  }
+  #hint.show { opacity: 1; }
+
+  /* 载入提示做成底部小胶囊：页面和五官立刻可见，不要拿黑屏挡着 */
+  #boot {
+    position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
+    z-index: 40; display: flex; align-items: center; gap: 10px;
+    padding: 9px 18px 9px 14px; border-radius: 999px; text-align: left;
+    background: rgba(20, 20, 28, 0.8); border: 1px solid var(--panel-line);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  }
+  #boot .spinner {
+    width: 15px; height: 15px; margin: 0; flex: 0 0 auto;
+    border: 2px solid rgba(255, 255, 255, 0.18); border-top-color: var(--accent);
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #boot h1 { font-size: 13px; margin: 0; font-weight: 600; white-space: nowrap; }
+  #boot p { font-size: 11.5px; color: var(--muted); margin: 2px 0 0; white-space: nowrap; }
+  #boot .inner { display: flex; flex-direction: column; }
+
+  #fatal {
+    position: fixed; inset: 0; z-index: 45; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 40%, #1c1c28, #0b0b10 70%); text-align: center; padding: 24px;
+  }
+  #boot .inner, #fatal .inner { max-width: 520px; }
+  #boot h1, #fatal h1 { font-size: 17px; margin: 0 0 8px; font-weight: 600; }
+  #boot p, #fatal p { font-size: 12.5px; color: var(--muted); line-height: 1.7; margin: 0 0 6px; }
+  #fatal code {
+    display: inline-block; background: rgba(255,255,255,.08); padding: 2px 6px; border-radius: 6px;
+    font-size: 11.5px; color: #ffd9c9; margin: 2px 0;
+  }
+  #fatal button, #filewarn a.btn {
+    margin-top: 14px; padding: 9px 18px; border-radius: 10px; border: 1px solid var(--panel-line);
+    background: rgba(255,255,255,.1); color: #fff; font: inherit; cursor: pointer; text-decoration: none; display: inline-block;
+  }
+  #filewarn {
+    position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+    background: #0b0b10; padding: 24px; text-align: center;
+  }
+  /* 作者样式里的 display 会盖掉 [hidden] 的 UA 规则，必须显式关掉 */
+  #fatal[hidden], #boot[hidden], #filewarn[hidden] { display: none !important; }
+  #toast {
+    position: fixed; left: 50%; top: 22px; transform: translate(-50%, -20px);
+    padding: 9px 16px; border-radius: 999px; background: rgba(20,20,28,.85);
+    border: 1px solid var(--panel-line); font-size: 12.5px; z-index: 30;
+    opacity: 0; transition: .25s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  /* 出问题时在页面上直接把话说清楚，不让人对着黑屏猜 */
+  #problem {
+    position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 40%, #241a1a, #0b0b10 70%); padding: 24px; text-align: center;
+  }
+  #problem[hidden] { display: none !important; }
+  #problem .inner { max-width: 560px; }
+  #problem h1 { font-size: 17px; margin: 0 0 10px; }
+  #problem p { font-size: 13px; line-height: 1.85; color: var(--muted); margin: 0 0 8px; }
+  #problem .detail {
+    font-family: Consolas, monospace; font-size: 11.5px; color: #ffd9c9; background: rgba(255, 255, 255, 0.07);
+    border-radius: 8px; padding: 8px 10px; margin: 10px 0; text-align: left; word-break: break-all; max-height: 120px; overflow: auto;
+  }
+  #problem .detail[hidden] { display: none !important; }
+  #problem button {
+    margin-top: 12px; padding: 9px 18px; border-radius: 10px; border: 1px solid var(--panel-line);
+    background: rgba(255, 255, 255, 0.1); color: #fff; font: inherit; cursor: pointer;
+  }
+
+  /* 有人坐到摄像头前时弹出的画风选择 */
+  #chooser {
+    position: fixed; inset: 0; z-index: 35; display: flex; align-items: center; justify-content: center;
+    background: rgba(10, 10, 16, 0.42); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+    padding: 20px; animation: fadeIn .18s ease;
+  }
+  #chooser[hidden] { display: none !important; }
+  @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+  #chooser .sheet { width: min(580px, 94vw); padding: 20px 20px 14px; text-align: center; }
+  #chooser h2 { margin: 0 0 4px; font-size: 19px; font-weight: 600; }
+  #chooser .sub { margin: 0 0 14px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+  #chooser .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  #chooser .tile {
+    border: 1px solid var(--panel-line); background: rgba(255, 255, 255, 0.06); border-radius: 14px;
+    padding: 8px 8px 6px; cursor: pointer; color: var(--text); font: inherit;
+    display: flex; flex-direction: column; align-items: center; gap: 1px; transition: .15s;
+  }
+  #chooser .tile:hover { background: rgba(255, 255, 255, 0.14); transform: translateY(-1px); }
+  #chooser .tile.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  #chooser .tile canvas { width: 100%; height: 126px; border-radius: 10px; display: block; background: #000; }
+  #chooser .tile b { font-size: 13px; margin-top: 4px; }
+  #chooser .tile span { font-size: 10.5px; color: var(--muted); }
+  #chooser .skip {
+    margin-top: 12px; background: none; border: 0; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
+  }
+  #chooser .skip:hover { color: var(--text); }
+</style>
+</head>
+<body>
+  <canvas id="view"></canvas>
+  <video id="cam" playsinline autoplay muted></video>
+
+  <section id="panel" class="card">
+    <div class="brand"><b>五官镜像</b><span>Face Feature Mirror</span></div>
+    <div class="build" id="buildTag"></div>
+    <div class="body">
+      <div class="status" id="status"><span class="dot" id="dot"></span><b id="statusText">正在启动…</b><br /><span id="statusSub"></span></div>
+
+      <div class="field">
+        <label>摄像头</label>
+        <select id="camSelect"></select>
+      </div>
+
+      <div class="field">
+        <label>画风</label>
+        <div class="seg" id="styleSeg"></div>
+      </div>
+
+      <div class="field">
+        <label>配色</label>
+        <div class="dots" id="paletteDots"></div>
+      </div>
+
+      <div class="field">
+        <label>五官大小 <span id="zoomVal"></span></label>
+        <input type="range" id="zoom" min="0.5" max="2.6" step="0.01" />
+      </div>
+
+      <div class="field">
+        <label>跟随头部移动 <span id="followVal"></span></label>
+        <input type="range" id="follow" min="0" max="1" step="0.01" />
+      </div>
+
+      <div class="field">
+        <label>表情幅度 <span id="sensVal"></span></label>
+        <input type="range" id="sens" min="0.4" max="2" step="0.01" />
+      </div>
+
+      <div class="field">
+        <label>我的画面</label>
+        <div class="seg" id="viewSeg"></div>
+      </div>
+
+      <div class="field">
+        <label>有人坐到摄像头前</label>
+        <div class="seg" id="promptSeg"></div>
+      </div>
+
+      <div class="actions">
+        <button id="shot">拍一张</button>
+        <button id="pickStyle">换画风</button>
+        <button id="reset">重置</button>
+        <button id="collapse">收起</button>
+      </div>
+      <div class="note">
+        画面只在本机浏览器里计算，不上传、不保存。<br />
+        快捷键：<span class="kbd">H</span> 收起面板 · <span class="kbd">F</span> 全屏 ·
+        <span class="kbd">S</span> 拍一张 · <span class="kbd">C</span> 换画风 ·
+        <span class="kbd">D</span> 调试视图 · <span class="kbd">1-4</span> 切画风
+      </div>
+    </div>
+  </section>
+
+  <div id="hint"></div>
+  <div id="toast"></div>
+
+  <!-- 有人坐到摄像头前 → 弹出画风选择（四个格子实时预览你自己的五官） -->
+  <div id="chooser" hidden>
+    <div class="sheet card">
+      <h2 id="chooserTitle">你好，选一个画风吧</h2>
+      <p class="sub">四个格子都是你自己五官的实时预览 · 也可以直接按 <b>1</b>–<b>4</b>，或按 <b>Esc</b> 先不选</p>
+      <div class="tiles" id="styleTiles"></div>
+      <button class="skip" id="chooserSkip">先用现在的画风（Esc）</button>
+    </div>
+  </div>
+
+  <div id="boot">
+    <div class="spinner"></div>
+    <div class="inner">
+      <h1 id="bootTitle">正在载入人脸模型…</h1>
+      <p id="bootMsg">本地模型，不需要联网</p>
+      <p id="bootTip" style="display:none"></p>
+    </div>
+  </div>
+
+  <div id="fatal" hidden>
+    <div class="inner">
+      <h1 id="fatalTitle">启动失败</h1>
+      <p id="fatalMsg"></p>
+      <p id="fatalHint"></p>
+      <button id="fatalRetry">重试</button>
+    </div>
+  </div>
+
+  <div id="problem" hidden>
+    <div class="inner">
+      <h1 id="problemTitle">出了点问题</h1>
+      <p id="problemMsg"></p>
+      <div class="detail" id="problemDetail" hidden></div>
+      <button id="problemRetry">重试</button>
+    </div>
+  </div>
+
+  <div id="filewarn" hidden>
+    <div class="inner">
+      <h1 style="font-size:18px;margin:0 0 10px">请用「启动-面容镜像.bat」打开</h1>
+      <p style="color:#a8a8b8;font-size:13px;line-height:1.8;max-width:520px;margin:0 auto">
+        浏览器不允许 <code>file://</code> 页面读取本地模型与摄像头。<br />
+        双击同目录下的 <b>启动-面容镜像.bat</b>，它会起一个本机小服务并自动打开页面。<br />
+        <span style="color:#8f8fa4">或者：直接双击 <b>五官镜像.html</b>（单文件版，读取内联资源，不需要任何启动器）。</span>
+      </p>
+      <p style="color:#6f6f80;font-size:11.5px;margin-top:14px">一切仍只在本机运行：服务只监听 127.0.0.1，数据不出网卡。</p>
+    </div>
+  </div>
+
+  <!-- 这段必须是普通脚本：file:// 下 ES module 会直接被 CORS 拦掉。
+       同时它是"最后一道保险"：只要页面出问题，就在这里把原因显示出来。 -->
+  <script>
+  (function () {
+    var errs = [];
+    function showProblem(title, msg, detail) {
+      var box = document.getElementById('problem');
+      if (!box) return;
+      document.getElementById('problemTitle').textContent = title;
+      document.getElementById('problemMsg').innerHTML = msg;
+      var d = document.getElementById('problemDetail');
+      if (detail) {
+        d.textContent = detail;
+        d.hidden = false;
+      } else {
+        d.hidden = true;
+      }
+      box.hidden = false;
+      var b = document.getElementById('boot');
+      if (b) b.style.display = 'none';
+    }
+    window.__fmShowProblem = showProblem;
+    function remember(t) {
+      try {
+        if (t && errs.indexOf(t) < 0) errs.push(String(t).slice(0, 400));
+      } catch (e) {}
+    }
+    window.addEventListener(
+      'error',
+      function (e) {
+        remember((e && (e.message || (e.error && e.error.message))) || '未知脚本错误');
+      },
+      true
+    );
+    window.addEventListener('unhandledrejection', function (e) {
+      remember('Promise: ' + ((e.reason && (e.reason.message || e.reason)) || '未知'));
+    });
+    var btn = document.getElementById('problemRetry');
+    if (btn) btn.onclick = function () { location.reload(); };
+
+    // 面板上显示构建编号：一眼就能看出打开的是哪一版
+    document.addEventListener('DOMContentLoaded', function () {
+      var tag = document.getElementById('buildTag');
+      if (tag) tag.textContent = window.__FM_BUILD || '源码版（未内联构建号）';
+    });
+
+    /** 出错时把环境信息一并带上，省得来回猜 */
+    function envInfo() {
+      var lines = [];
+      try {
+        lines.push('构建 ' + (window.__FM_BUILD || '(源码版)'));
+        lines.push('协议 ' + location.protocol + ' · 安全上下文 ' + isSecureContext);
+        lines.push('baseURI ' + String(document.baseURI).slice(0, 70));
+        var m = document.querySelector('meta[http-equiv="Content-Security-Policy" i]');
+        lines.push('CSP ' + (m ? String(m.content).slice(0, 220) : '（无 meta）'));
+        var t = window.__fmTimings || {};
+        var ms = function (a, b) { return (a != null && b != null) ? Math.round(a - b) + 'ms' : '-'; };
+        lines.push('耗时 解码 ' + ms(t.decodeEnd, t.decodeStart) + ' / fileset ' + ms(t.filesetEnd, t.filesetStart) + ' / 建任务 ' + ms(t.createEnd, t.createStart));
+        lines.push('胶水层 ' + (typeof window.ModuleFactory === 'function' ? '就绪' : '未就绪'));
+      } catch (e) {
+        lines.push('（环境信息读取失败：' + e.message + '）');
+      }
+      return lines.join('\n');
+    }
+    window.__fmEnvInfo = envInfo;
+
+    // file:// 直开源码版（没有内联资源、也没有应用脚本）→ 提示用 bat 打开
+    document.addEventListener('DOMContentLoaded', function () {
+      if (location.protocol === 'file:' && !window.__FM_STANDALONE && typeof window.__fm === 'undefined') {
+        document.getElementById('filewarn').hidden = false;
+        var b = document.getElementById('boot');
+        if (b) b.style.display = 'none';
+      }
+    });
+
+    // 6 秒还没看到应用脚本 → 报错原文 / 文件不完整 / 被打开它的程序拦下了
+    setTimeout(function () {
+      if (typeof window.__fm === 'undefined') {
+        if (errs.length) {
+          showProblem(
+            '页面脚本报错了',
+            '脚本在启动阶段就抛出异常，所以整页功能都没起来（你看到的只有静态 HTML 外壳）。<br />' +
+              '下面那句就是错误原文。若你是用「文件预览面板」打开的这个文件，' +
+              '请改用<b>资源管理器双击</b>（你机器上默认会用 Microsoft Edge 打开）。',
+            envInfo() + '\n\n' + errs[0]
+          );
+        } else {
+          showProblem(
+            '页面脚本没有执行',
+            '要么这个 HTML <b>没有写完整</b>（尾部被截断、复制不全），要么打开它的程序把脚本拦下了。<br />' +
+              '请用<b>资源管理器双击</b>这个文件（你机器上默认会用 Microsoft Edge 打开），' +
+              '不要在预览面板里点开。',
+            envInfo()
+          );
+        }
+      }
+    }, 6000);
+
+    // 20 秒还没就绪 → 说清楚卡在哪
+    setTimeout(function () {
+      if (typeof window.__fm !== 'undefined' && !window.__fmReady) {
+        var b = document.getElementById('bootMsg');
+        showProblem(
+          '模型没有载入完成',
+          '页面脚本跑了，但人脸模型没能就绪。可能是文件不完整（内联资源缺失），' +
+            '或浏览器太旧（需要支持 WebAssembly SIMD 的新版 Edge / Chrome）。<br />' +
+            '按 F12 打开控制台可以看到具体报错。',
+          errs[0] || (b ? b.textContent : '')
+        );
+      }
+    }, 20000);
+
+    // 9 秒的常规提示（正常载入时也可能短暂出现）
+    setTimeout(function () {
+      if (!window.__fmReady && typeof window.__fm !== 'undefined') {
+        var tip = document.getElementById('bootTip');
+        if (tip) {
+          tip.style.display = 'block';
+          tip.textContent = '还在载入… 若长时间停住，按 F12 看控制台报错。';
+        }
+      }
+    }, 9000);
+  })();
+  </script>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
