@@ -120,7 +120,10 @@ async function fetchBytes(url, key, label) {
       if (done) break;
       chunks.push(value);
       got += value.length;
-      globalThis.__fmLoading = { ...(globalThis.__fmLoading || {}), stage: '下载', note: `正在下载${label}…`, key, got, total };
+      // 注意：GitHub Pages 对 wasm 会 gzip，content-length 是**压缩后**的大小，
+      // 而我们数的是解压后的字节 → 出现 "9.1 / 2.9 MB" 这种怪数字。读超了就只显示已下载量。
+      const shownTotal = total && got <= total ? total : 0;
+      globalThis.__fmLoading = { ...(globalThis.__fmLoading || {}), stage: '下载', note: `正在下载${label}…`, key, got, total: shownTotal };
       try {
         globalThis.__fmStageHook && globalThis.__fmStageHook(globalThis.__fmLoading);
       } catch {
