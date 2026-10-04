@@ -359,8 +359,11 @@ export class SignalEngine {
     );
 
     // ---- 脸整体 ----------------------------------------------------------
-    S.face.cx = this.smooth('fcx', px(rawFaceCx), dtc, 0.07, 0.07);
-    S.face.cy = this.smooth('fcy', py(rawFaceCy), dtc, 0.07, 0.07);
+    // 脸心在画布上的位置就是「画面中心 + 偏移」（偏移已按 follow 缩放并做过软限位）。
+    // ⚠️ 不能再喂 px(rawFaceCx)：rawFaceCx 已经是镜像后的值，px 里的 (1 - n) 会把它反第二次，
+    //    于是脸框/腮红/光环/点击区域会跑到别人的位置上（Y 轴不镜像，所以一直没露馅）。
+    S.face.cx = this.smooth('fcx', W / 2 + offX, dtc, 0.07, 0.07);
+    S.face.cy = this.smooth('fcy', H / 2 + offY, dtc, 0.07, 0.07);
     S.face.w = this.smooth('fw', metric(faceW), dtc, 0.1, 0.1);
     S.face.h = this.smooth('fh', metricY(faceH), dtc, 0.1, 0.1);
     S.face.roll = this.smooth('roll2', roll, dtc, 0.07, 0.07);

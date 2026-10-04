@@ -138,7 +138,7 @@ if (pagesExisting.__status === 404) {
 const site = `https://${me.login.toLowerCase()}.github.io/${REPO}/`;
 log('\n站点地址：', site);
 log('等待 Pages 构建（首次通常 1–3 分钟）…');
-for (let i = 0; i < 40; i++) {
+for (let i = 0; i < 20; i++) {
   await sleep(15000);
   const st = await api('GET', `/repos/${me.login}/${REPO}/pages`);
   log(`  [${((i + 1) * 15)}s] status=${st.status || '?'}`);

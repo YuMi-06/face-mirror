@@ -55,7 +55,7 @@ const ctx = el.canvas.getContext('2d', { alpha: false });
 const app = {
   settings: { ...DEFAULT_SETTINGS },
   tracker: null,
-  engine: new SignalEngine(),
+  engine: new SignalEngine(), // 兼容字段：真正的人脸状态在 people 里（一人一套）
   state: null,
   stream: null,
   devices: [],
@@ -66,11 +66,16 @@ const app = {
   cameraError: null,
   fps: 0,
   lastVideoTime: -1,
-  lastRaw: null,
+  lastFaces: [],
   override: null,
   dpr: 1,
   W: 0,
   H: 0,
+  /** 多人：一人一套会话（状态机 + 画风），见 createPerson / trackPeople */
+  people: [],
+  activeId: null,
+  nextPersonId: 1,
+  peopleOnScreen: 0,
 };
 
 /** 画风选择的弹出状态：谁坐到摄像头前，就给谁弹一次 */
@@ -205,6 +210,8 @@ function syncLabels() {
 
 function setStyle(id) {
   app.settings.style = id;
+  const p = activePerson(); // 画风记在当前这个人身上：多人同框时各用各的
+  if (p) p.style = id;
   syncUi();
   saveSettings();
   const s = STYLES.find((x) => x.id === id);
@@ -213,6 +220,8 @@ function setStyle(id) {
 
 function setPalette(id) {
   app.settings.palette = id;
+  const p = activePerson();
+  if (p) p.palette = id;
   syncUi();
   saveSettings();
 }
@@ -353,6 +362,44 @@ function resize() {
   }
 }
 window.addEventListener('resize', resize);
+
+// ---------------------------------------------------------------- 多人：点谁切换谁
+function hitTestPerson(x, y) {
+  const hit = personRects().filter((q) => x >= q.x0 && x <= q.x1 && y >= q.y0 && y <= q.y1);
+  if (!hit.length) return null;
+  // 重叠时取范围最小的那个（更贴脸）
+  hit.sort((a, b) => (a.x1 - a.x0) * (a.y1 - a.y0) - (b.x1 - b.x0) * (b.y1 - b.y0));
+  return hit[0].p;
+}
+
+/** 点已经选中的那位 = 直接给他换画风；点别人 = 切换过去（并按设置弹选择） */
+function pickPersonAt(x, y) {
+  const p = hitTestPerson(x, y);
+  if (!p) return false;
+  if (p.id === app.activeId) {
+    if (app.settings.autoPrompt && !ui.open) openChooser('switch');
+  } else {
+    setActivePerson(p.id, { openPicker: true });
+  }
+  return true;
+}
+
+el.canvas.addEventListener('pointerdown', (e) => {
+  const r = el.canvas.getBoundingClientRect();
+  pickPersonAt(e.clientX - r.left, e.clientY - r.top);
+});
+el.canvas.addEventListener('pointermove', (e) => {
+  const r = el.canvas.getBoundingClientRect();
+  const over = hitTestPerson(e.clientX - r.left, e.clientY - r.top);
+  el.canvas.style.cursor = over ? 'pointer' : 'default';
+});
+
+function cyclePerson() {
+  const list = app.people.filter((p) => p.box);
+  if (list.length < 2) return;
+  const i = list.findIndex((p) => p.id === app.activeId);
+  setActivePerson(list[(i + 1) % list.length].id, { openPicker: false });
+}
 
 // ---------------------------------------------------------------- 摄像头
 function cameraErrorText(err) {
@@ -515,13 +562,214 @@ function drawDebugVideo(state) {
 }
 
 // ---------------------------------------------------------------- 主循环
-function envOf() {
+/** 一个人的一次"在场"：独立的状态机（自适应基线互不影响）+ 独立的画风/配色 */
+function createPerson(id) {
+  return {
+    id,
+    engine: new SignalEngine(),
+    style: app.settings.style,
+    palette: app.settings.palette,
+    state: null,
+    box: null,
+    prevC: null,
+    lastSeen: 0,
+  };
+}
+
+function activePerson() {
+  return app.people.find((p) => p.id === app.activeId) || app.people[0] || null;
+}
+
+function envOf(person) {
+  const st = person && person.state;
   return {
     W: app.W,
     H: app.H,
-    t: app.state ? app.state.t : 0,
-    pal: PALETTES[app.settings.palette],
+    t: st ? st.t : 0,
+    pal: PALETTES[(person && person.palette) || app.settings.palette],
   };
+}
+
+/** 新面孔出现 / 离开 ≥5 秒又回来：都算"来了一位"，切到他并（按设置）弹画风选择 */
+function onPersonArrived(p, returning) {
+  app.activeId = p.id;
+  ui.appearance += 1;
+  // 面板跟着切到这个人的设置
+  app.settings.style = p.style;
+  app.settings.palette = p.palette;
+  syncUi();
+  if (app.settings.autoPrompt && !ui.open) openChooser(returning ? 'return' : 'auto');
+}
+
+/**
+ * 把这一帧检出的所有脸关联到已有的人：按"离上一帧谁最近"匹配（MediaPipe 不给稳定 id），
+ * 匹配不到就新建一个会话；久未出现的退休（≥5 秒，对应"换了个人"的判定阈值）。
+ */
+function trackPeople(faces, dt, now) {
+  const env = {
+    W: app.W,
+    H: app.H,
+    zoom: app.settings.zoom,
+    follow: app.settings.follow,
+    sensitivity: app.settings.sensitivity,
+    aspect: el.video.videoWidth ? el.video.videoHeight / el.video.videoWidth : 0.75,
+  };
+  const used = new Set();
+  for (const f of faces) {
+    const c = { x: (f.box.x0 + f.box.x1) / 2, y: (f.box.y0 + f.box.y1) / 2 };
+    let best = null;
+    let bestD = 0.16; // 归一化距离阈值（约脸宽 1/4），超过就当成另一个人
+    for (const p of app.people) {
+      if (used.has(p.id) || !p.prevC) continue;
+      const d = Math.hypot(c.x - p.prevC.x, c.y - p.prevC.y);
+      if (d < bestD) {
+        bestD = d;
+        best = p;
+      }
+    }
+    if (!best) {
+      // 新面孔：建会话 + 当成"来了一位"（要弹画风选择的就是这一步）
+      best = createPerson(app.nextPersonId++);
+      app.people.push(best);
+      onPersonArrived(best, false);
+    } else if (now - best.lastSeen > NEW_FACE_ABSENCE_SEC * 1000) {
+      onPersonArrived(best, true); // 走了很久又回来 = 又来了一位
+    }
+    used.add(best.id);
+    best.prevC = c;
+    best.box = f.box;
+    best.lastSeen = now;
+    best.state = best.engine.update({ landmarks: f.landmarks, blendshapes: f.blendshapes }, dt, env);
+    // 诊断用：这一帧这个人吃的是哪张脸、结果落在哪里
+    best.dbg = {
+      faceIdx: faces.indexOf(f),
+      rawC: { x: +c.x.toFixed(3), y: +c.y.toFixed(3) },
+      outFaceCx: Math.round(best.state.face.cx),
+      outEye0X: Math.round(best.state.eyes[0].x),
+      engine: best.engine.__tag || (best.engine.__tag = Math.random().toString(36).slice(2, 6)),
+    };
+  }
+  // 这一帧没匹配上的：喂 null 让它"睡着"；离开超过阈值且不是唯一一位就退场
+  for (const p of app.people) {
+    if (!used.has(p.id)) {
+      p.state = p.engine.update(null, dt, env);
+      p.box = null;
+    }
+  }
+  for (let i = app.people.length - 1; i >= 0; i--) {
+    const p = app.people[i];
+    if (!used.has(p.id) && now - p.lastSeen > NEW_FACE_ABSENCE_SEC * 1000 && app.people.length > 1) app.people.splice(i, 1);
+  }
+  if (!app.people.some((p) => p.id === app.activeId)) app.activeId = app.people[0] ? app.people[0].id : null;
+  app.peopleOnScreen = used.size;
+}
+
+/** 每个人在画布上的可点击范围（比画出来的五官略大一圈，好点） */
+function personRects() {
+  const out = [];
+  for (const p of app.people) {
+    const st = p.state;
+    if (!st || !p.box) continue;
+    const w = Math.max(st.face.w, 60);
+    const h = Math.max(st.face.h, 60);
+    out.push({
+      p,
+      x0: st.face.cx - w * 0.72,
+      y0: st.face.cy - h * 0.8,
+      x1: st.face.cx + w * 0.72,
+      y1: st.face.cy + h * 1.05,
+    });
+  }
+  return out;
+}
+
+/** 只画某个人的五官（可选缩放/半透明）——背景不重画 */
+function drawPersonFeatures(p, k = 1, alpha = 1) {
+  const st = p.state;
+  if (!st) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  if (k !== 1) {
+    ctx.translate(st.face.cx, st.face.cy);
+    ctx.scale(k, k);
+    ctx.translate(-st.face.cx, -st.face.cy);
+  }
+  render(ctx, p.style, st, envOf(p), 'features');
+  ctx.restore();
+}
+
+/** 每个人一个编号徽标：当前那位高亮一圈，并且提示"点我切换" */
+function drawPersonBadges() {
+  const rects = personRects();
+  if (!rects.length) return;
+  const multi = rects.length > 1;
+  rects.forEach((r, idx) => {
+    const isActive = r.p.id === app.activeId;
+    if (!multi && !isActive) return;
+    const pad = 10;
+    ctx.save();
+    ctx.globalAlpha = isActive ? 0.95 : 0.62;
+    ctx.strokeStyle = isActive ? PALETTES[r.p.palette].accent : 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = isActive ? 3 : 2;
+    ctx.setLineDash(isActive ? [] : [7, 6]);
+    const rr = 18;
+    const x = r.x0 - pad;
+    const y = r.y0 - pad;
+    const w = r.x1 - r.x0 + pad * 2;
+    const h = r.y1 - r.y0 + pad * 2;
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+    ctx.stroke();
+    // 编号
+    const label = `${idx + 1}${isActive ? ' · 当前' : ''}`;
+    ctx.setLineDash([]);
+    ctx.font = '600 13px system-ui, "Microsoft YaHei", sans-serif';
+    const tw = ctx.measureText(label).width;
+    ctx.globalAlpha = isActive ? 0.92 : 0.6;
+    ctx.fillStyle = 'rgba(18,18,26,0.72)';
+    const bx = x + 2;
+    const by = y - 22;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, tw + 18, 20, 10);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, bx + 9, by + 14);
+    ctx.restore();
+  });
+  if (multi) {
+    // 底部提示：点谁切换谁
+    ctx.save();
+    ctx.globalAlpha = 0.75;
+    ctx.font = '500 13px system-ui, "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    const msg = '画面里有 ' + rects.length + ' 个人 · 点谁就切换成谁（也可以按 Tab）';
+    const tw = ctx.measureText(msg).width;
+    ctx.fillStyle = 'rgba(18,18,26,0.7)';
+    ctx.beginPath();
+    ctx.roundRect(app.W / 2 - tw / 2 - 14, app.H - 74, tw + 28, 26, 13);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText(msg, app.W / 2, app.H - 56);
+    ctx.restore();
+  }
+}
+
+/** 切换当前这个人 */
+function setActivePerson(id, { openPicker = false } = {}) {
+  const p = app.people.find((x) => x.id === id);
+  if (!p || app.activeId === id) return;
+  app.activeId = id;
+  app.settings.style = p.style;
+  app.settings.palette = p.palette;
+  syncUi();
+  const idx = app.people.findIndex((x) => x.id === id) + 1;
+  toast(`已切换到第 ${idx} 个人 · ${(STYLES.find((s) => s.id === p.style) || {}).name || p.style}`);
+  if (openPicker && app.settings.autoPrompt && !ui.open) openChooser('switch');
 }
 
 function frame(now) {
@@ -530,65 +778,46 @@ function frame(now) {
   app.lastNow = now;
   if (dt > 0) app.fps = app.fps ? app.fps * 0.9 + (1 / dt) * 0.1 : 1 / dt;
 
-  let raw = null;
+  let faces = [];
   if (app.tracker && app.modelReady && el.video.readyState >= 2) {
     if (el.video.currentTime !== app.lastVideoTime) {
       app.lastVideoTime = el.video.currentTime;
       try {
-        app.lastRaw = app.tracker.detect(el.video, now);
+        app.lastFaces = app.tracker.detect(el.video, now);
       } catch (err) {
         console.warn('[detect]', err);
       }
     }
-    raw = app.lastRaw;
+    faces = app.lastFaces || [];
   }
 
-  const state = app.engine.update(raw, dt, {
-    W: app.W,
-    H: app.H,
-    zoom: app.settings.zoom,
-    follow: app.settings.follow,
-    sensitivity: app.settings.sensitivity,
-    aspect: el.video.videoWidth ? el.video.videoHeight / el.video.videoWidth : 0.75,
-  });
-  app.state = state;
-  if (app.override) applyOverride(state, app.override);
-
-  // —— 谁坐到摄像头前：识别「新面孔出现」这个事件，用来弹画风选择 ——
-  const present = !!state.detected;
-  if (present) {
-    if (!ui.present) {
-      ui.appearance += 1;
-      ui.absentBefore = ui.absentSec; // 这次出现之前，画面里空了多久
-      ui.absentSec = 0;
-      ui.presentSec = 0;
-    }
-    ui.presentSec += dt;
-    ui.present = true;
-  } else {
-    ui.presentSec = 0;
-    ui.absentSec += dt;
-    ui.present = false;
+  // 至少留一个会话：没人在画面里时，中间那副"睡着的五官"就是它
+  if (!app.people.length) {
+    app.people.push(createPerson(app.nextPersonId++));
+    app.activeId = app.people[0].id;
+    app.settings.style = app.people[0].style;
+    app.settings.palette = app.people[0].palette;
+    syncUi();
   }
-  if (
-    !ui.open &&
-    app.settings.autoPrompt &&
-    present &&
-    ui.presentSec > 0.6 &&
-    ui.promptedAppearance !== ui.appearance
-  ) {
-    // 第一次出现，或者中间空了很久（>= NEW_FACE_ABSENCE_SEC）→ 当成换了个人，弹一次
-    if (ui.appearance === 1 || ui.absentBefore >= NEW_FACE_ABSENCE_SEC) openChooser('auto');
-    else ui.promptedAppearance = ui.appearance; // 同一个人短暂离开又回来，不打扰
-  }
+  trackPeople(faces, dt, now);
 
-  const env = envOf();
-  render(ctx, app.settings.style, state, env);
-  drawPip(state, app.W, app.H);
+  const act = activePerson();
+  app.state = act ? act.state : null;
+  if (app.state && app.override) applyOverride(app.state, app.override);
+
+  const env = envOf(act);
+  if (act) {
+    render(ctx, act.style, act.state, env, 'all'); // 背景 + 当前这位的五官
+    const others = app.people.filter((p) => p !== act && p.box);
+    for (const p of others) drawPersonFeatures(p, 0.55, 0.82); // 其他人：缩小、半透明
+    if (others.length) drawPersonFeatures(act, 1, 1); // 当前这位再画一遍，压在最上层
+  }
+  drawPip(app.state, app.W, app.H);
   if (app.settings.view === 'debug') {
-    drawDebugVideo(state);
-    drawLandmarks(state);
+    drawDebugVideo(app.state);
+    drawLandmarks(app.state);
   }
+  drawPersonBadges();
   if (ui.open && now - ui.lastPreview > 90) {
     ui.lastPreview = now;
     drawPreviews();
@@ -612,9 +841,11 @@ function updateStatus() {
     return;
   }
   if (!st) return;
+  const n = app.people.filter((p) => p.box).length;
   if (st.detected) {
     hideHint();
-    setStatus('on', '已识别到你的脸', `${app.tracker?.delegate || '-'} · ${fps}fps · ${app.camInfo || ''}`);
+    const who = n > 1 ? `已识别到 ${n} 个人 · 当前第 ${app.people.findIndex((p) => p.id === app.activeId) + 1} 位` : '已识别到你的脸';
+    setStatus('on', who, `${app.tracker?.delegate || '-'} · ${fps}fps · ${app.camInfo || ''}${n > 1 ? ' · 点画面里的人切换' : ''}`);
   } else {
     setStatus('warn', '没有看到脸', `${fps}fps · 把脸放进取景范围、光线亮一点`);
     if (app.settings.showHint) showHint('把脸放进画面里，五官就会出现～');
@@ -630,7 +861,20 @@ function snapshot() {
   cv.height = el.canvas.height;
   const c = cv.getContext('2d');
   c.setTransform(app.dpr, 0, 0, app.dpr, 0, 0);
+  const act = activePerson();
   render(c, app.settings.style, st, { W: app.W, H: app.H, t: st.t, pal: PALETTES[app.settings.palette] });
+  // 多人同框时，其他几位也一起拍进去（缩小、半透明）
+  for (const p of app.people) {
+    if (p === act || !p.box || !p.state) continue;
+    c.save();
+    c.globalAlpha = 0.82;
+    c.translate(p.state.face.cx, p.state.face.cy);
+    c.scale(0.55, 0.55);
+    c.translate(-p.state.face.cx, -p.state.face.cy);
+    render(c, p.style, p.state, { W: app.W, H: app.H, t: p.state.t, pal: PALETTES[p.palette] }, 'features');
+    c.restore();
+  }
+  if (act) render(c, app.settings.style, st, { W: app.W, H: app.H, t: st.t, pal: PALETTES[app.settings.palette] }, 'features');
   cv.toBlob((blob) => {
     if (!blob) return;
     const url = URL.createObjectURL(blob);
@@ -902,7 +1146,11 @@ window.__fm = {
     app.override = null;
   },
   setSettings(patch) {
-    Object.assign(app.settings, patch);
+    // style / palette 要走正常入口，否则不会记到"当前这个人"身上（多人时两边会串）
+    const { style, palette, ...rest } = patch || {};
+    Object.assign(app.settings, rest);
+    if (style) setStyle(style);
+    if (palette) setPalette(palette);
     syncUi();
   },
   chooser() {
@@ -916,6 +1164,45 @@ window.__fm = {
         return { id: t.id, x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), w: Math.round(r.width) };
       }),
     };
+  },
+  /** 多人状态：谁在画面里、谁是当前 */
+  people() {
+    return {
+      activeId: app.activeId,
+      onScreen: app.people.filter((p) => p.box).length,
+      list: app.people.map((p, i) => {
+        const st = p.state;
+        const r = personRects().find((q) => q.p === p);
+        return {
+          index: i + 1,
+          id: p.id,
+          style: p.style,
+          palette: p.palette,
+          onScreen: !!p.box,
+          active: p.id === app.activeId,
+          faceW: st ? Math.round(st.face.w) : 0,
+          face: st ? { cx: Math.round(st.face.cx), cy: Math.round(st.face.cy), w: Math.round(st.face.w), h: Math.round(st.face.h) } : null,
+          eyes: st ? st.eyes.map((e) => ({ x: Math.round(e.x), y: Math.round(e.y), w: Math.round(e.w), open: +e.open.toFixed(2) })) : null,
+          mouth: st ? { x: Math.round(st.mouth.x), y: Math.round(st.mouth.y), w: Math.round(st.mouth.w) } : null,
+          detected: st ? st.detected : false,
+          dbg: p.dbg || null,
+          center: st ? { x: Math.round(st.face.cx), y: Math.round(st.face.cy) } : null,
+          hit: r ? { x: Math.round((r.x0 + r.x1) / 2), y: Math.round((r.y0 + r.y1) / 2) } : null,
+        };
+      }),
+    };
+  },
+  setActive(id) {
+    setActivePerson(id, { openPicker: false });
+    return app.activeId;
+  },
+  cycle() {
+    cyclePerson();
+    return app.activeId;
+  },
+  /** 模拟一次点击（坐标是画布 CSS px） */
+  click(x, y) {
+    return pickPersonAt(x, y);
   },
   openChooser(reason) {
     openChooser(reason || 'manual');
@@ -968,6 +1255,18 @@ window.__fm = {
 window.addEventListener('keydown', (e) => {
   if (e.target && ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
   const k = e.key.toLowerCase();
+  // 多人：Tab 轮换、Alt+1–4 直接选第 N 位
+  if (k === 'tab' && !ui.open) {
+    e.preventDefault();
+    cyclePerson();
+    return;
+  }
+  if (e.altKey && k >= '1' && k <= '4') {
+    const list = app.people.filter((p) => p.box);
+    const target = list[Number(k) - 1];
+    if (target) setActivePerson(target.id, { openPicker: false });
+    return;
+  }
   // 画风选择打开时，1–4 直接选中并关闭，Esc 先不选
   if (ui.open) {
     if (k === 'escape') {

@@ -7,8 +7,11 @@ import { drawSleepZs } from './util.js';
 
 export const RENDERERS = { kawaii, abstract, pixel, ink };
 
-export function render(ctx, styleId, S, env) {
+/**
+ * @param part 'all' = 背景 + 五官；'features' = 只画五官（多人同框时背景只铺一次）
+ */
+export function render(ctx, styleId, S, env, part = 'all') {
   const fn = RENDERERS[styleId] || RENDERERS.kawaii;
-  fn(ctx, S, env);
-  drawSleepZs(ctx, S, env.pal, env.t);
+  fn(ctx, S, env, part);
+  if (part !== 'features') drawSleepZs(ctx, S, env.pal, env.t);
 }

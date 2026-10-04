@@ -17,10 +17,13 @@ function scanlines(ctx, W, H, dark) {
   ctx.drawImage(scanCache.cv, 0, 0);
 }
 
-export function draw(ctx, S, env) {
+export function draw(ctx, S, env, part) {
   const { W, H, t, pal } = env;
-  ctx.fillStyle = pal.bg;
-  ctx.fillRect(0, 0, W, H);
+  const featuresOnly = part === 'features';
+  if (!featuresOnly) {
+    ctx.fillStyle = pal.bg;
+    ctx.fillRect(0, 0, W, H);
+  }
 
   const avgEye = (S.eyes[0].w + S.eyes[1].w) / 2;
   const cell = Math.max(4, Math.min(40, Math.round(avgEye / 5)));
@@ -29,24 +32,26 @@ export function draw(ctx, S, env) {
   const ink = pal.ink;
   const dim = pal.soft;
 
-  // 网格底纹
-  ctx.save();
-  ctx.globalAlpha = pal.dark ? 0.13 : 0.07;
-  ctx.fillStyle = pal.accent;
-  for (let x = 0; x < W; x += cell * 2) ctx.fillRect(x, 0, 1, H);
-  for (let y = 0; y < H; y += cell * 2) ctx.fillRect(0, y, W, 1);
-  ctx.restore();
+  if (!featuresOnly) {
+    // 网格底纹
+    ctx.save();
+    ctx.globalAlpha = pal.dark ? 0.13 : 0.07;
+    ctx.fillStyle = pal.accent;
+    for (let x = 0; x < W; x += cell * 2) ctx.fillRect(x, 0, 1, H);
+    for (let y = 0; y < H; y += cell * 2) ctx.fillRect(0, y, W, 1);
+    ctx.restore();
 
-  // 马赛克柔光块
-  ctx.save();
-  ctx.globalAlpha = pal.dark ? 0.5 : 0.35;
-  ctx.fillStyle = dim;
-  const bx = snap(S.face.cx - S.face.w * 0.8);
-  const by = snap(S.face.cy - S.face.h * 0.55);
-  const bw = rows(S.face.w * 1.6 / cell) * cell;
-  const bh = rows(S.face.h * 1.1 / cell) * cell;
-  ctx.fillRect(bx, by, bw, bh);
-  ctx.restore();
+    // 马赛克柔光块
+    ctx.save();
+    ctx.globalAlpha = pal.dark ? 0.5 : 0.35;
+    ctx.fillStyle = dim;
+    const bx = snap(S.face.cx - S.face.w * 0.8);
+    const by = snap(S.face.cy - S.face.h * 0.55);
+    const bw = rows(S.face.w * 1.6 / cell) * cell;
+    const bh = rows(S.face.h * 1.1 / cell) * cell;
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.restore();
+  }
 
   const block = (x, y, w, h, color) => {
     ctx.fillStyle = color;

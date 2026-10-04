@@ -11,13 +11,14 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'publish');
 
 // 要复制的代码 / 资源（文档由人写好放在 publish/ 里，这里不动）
-const FILES = ['index.html', '五官镜像.html', 'serve.mjs', '启动-面容镜像.bat', '打开-五官镜像.bat', '打开-五官镜像.url'];
+// 不含 打开-五官镜像.url：它指向本机绝对路径，对别人没用
+const FILES = ['index.html', '五官镜像.html', 'serve.mjs', '启动-面容镜像.bat', '打开-五官镜像.bat'];
 const DIRS = ['src', 'vendor', '_tools'];
 
 // 明确排除的东西
 const EXCLUDE = [
   /portrait\.jpg$/i, // MediaPipe 的测试肖像（真人照片）
-  /face_test\.y4m$/i,
+  /\.y4m$/i, // 测试视频（几十 MB），绝不进仓库
   /\.log$/i,
   /node_modules/,
   /_verify/,

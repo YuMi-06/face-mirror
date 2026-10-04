@@ -86,36 +86,38 @@ function drawBrow(ctx, br, pal, idx) {
   ctx.restore();
 }
 
-export function draw(ctx, S, env) {
+export function draw(ctx, S, env, part) {
   const { W, H, t, pal } = env;
-  ctx.fillStyle = pal.bg;
-  ctx.fillRect(0, 0, W, H);
+  if (part !== 'features') {
+    ctx.fillStyle = pal.bg;
+    ctx.fillRect(0, 0, W, H);
 
-  // 宣纸纤维
-  ctx.save();
-  ctx.globalAlpha = 0.5;
-  ctx.drawImage(noiseTexture(W, H, { seed: 11, dots: 3200, alpha: 0.16, color: '#8a7a5c', size: 1.5 }), 0, 0);
-  ctx.globalAlpha = 0.35;
-  ctx.drawImage(noiseTexture(W, H, { seed: 29, dots: 240, alpha: 0.3, color: '#6b5c40', size: 5 }), 0, 0);
-  ctx.restore();
+    // 宣纸纤维
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.drawImage(noiseTexture(W, H, { seed: 11, dots: 3200, alpha: 0.16, color: '#8a7a5c', size: 1.5 }), 0, 0);
+    ctx.globalAlpha = 0.35;
+    ctx.drawImage(noiseTexture(W, H, { seed: 29, dots: 240, alpha: 0.3, color: '#6b5c40', size: 5 }), 0, 0);
+    ctx.restore();
 
-  // 远处淡墨：柔和的径向晕，别用硬边块面
-  ctx.save();
-  const r = rng(97);
-  for (let i = 0; i < 3; i++) {
-    const cx = W * (0.18 + r() * 0.64) + Math.sin(t * 0.07 + i) * W * 0.03;
-    const cy = H * (0.18 + r() * 0.64);
-    const rad = Math.min(W, H) * (0.24 + r() * 0.26);
-    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
-    g.addColorStop(0, 'rgba(58,52,42,0.13)');
-    g.addColorStop(0.6, 'rgba(58,52,42,0.05)');
-    g.addColorStop(1, 'rgba(58,52,42,0)');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(cx, cy, rad, 0, Math.PI * 2);
-    ctx.fill();
+    // 远处淡墨：柔和的径向晕，别用硬边块面
+    ctx.save();
+    const r = rng(97);
+    for (let i = 0; i < 3; i++) {
+      const cx = W * (0.18 + r() * 0.64) + Math.sin(t * 0.07 + i) * W * 0.03;
+      const cy = H * (0.18 + r() * 0.64);
+      const rad = Math.min(W, H) * (0.24 + r() * 0.26);
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
+      g.addColorStop(0, 'rgba(58,52,42,0.13)');
+      g.addColorStop(0.6, 'rgba(58,52,42,0.05)');
+      g.addColorStop(1, 'rgba(58,52,42,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
-  ctx.restore();
 
   // 腮红：淡朱砂晕
   const blush = clamp01(S.cheek.blush + S.cheek.puff * 0.6);

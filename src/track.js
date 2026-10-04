@@ -63,7 +63,7 @@ async function waitForStandalone(timeoutMs = 5000) {
 
 const OPTIONS = {
   runningMode: 'VIDEO',
-  numFaces: 1,
+  numFaces: 4, // 多人一起用：最多同时跟 4 张脸
   outputFaceBlendshapes: true,
   outputFacialTransformationMatrixes: false,
   minFaceDetectionConfidence: 0.4,
@@ -144,29 +144,44 @@ export class FaceTracker {
   /**
    * @param {HTMLVideoElement} video
    * @param {number} timestampMs 必须单调递增
-   * @returns {{landmarks: Array<{x:number,y:number,z:number}>, blendshapes: Record<string, number>}|null}
+   * @returns {Array<{landmarks:any[], blendshapes:Record<string,number>, box:{x0:number,y0:number,x1:number,y1:number}}>}
+   *          这一帧里的**所有人脸**（0 ~ numFaces 张）
    */
   detect(video, timestampMs) {
-    if (!this.landmarker || video.readyState < 2) return null;
+    if (!this.landmarker || video.readyState < 2) return [];
     let result;
     try {
       result = this.landmarker.detectForVideo(video, timestampMs);
     } catch (err) {
       this.failStreak += 1;
-      if (this.failStreak < 4) return null;
+      if (this.failStreak < 4) return [];
       throw err;
     }
     this.failStreak = 0;
     this.lastDetectAt = timestampMs;
 
-    const landmarks = result?.faceLandmarks?.[0] || null;
-    if (!landmarks || landmarks.length < 400) return null;
-
-    const blendshapes = {};
-    const cats = result?.faceBlendshapes?.[0]?.categories;
-    if (cats) for (const c of cats) blendshapes[c.categoryName] = c.score;
-
-    return { landmarks, blendshapes };
+    const all = result?.faceLandmarks || [];
+    const blendSets = result?.faceBlendshapes || [];
+    const faces = [];
+    for (let i = 0; i < all.length; i++) {
+      const landmarks = all[i];
+      if (!landmarks || landmarks.length < 400) continue;
+      let x0 = 1;
+      let y0 = 1;
+      let x1 = 0;
+      let y1 = 0;
+      for (const p of landmarks) {
+        if (p.x < x0) x0 = p.x;
+        if (p.x > x1) x1 = p.x;
+        if (p.y < y0) y0 = p.y;
+        if (p.y > y1) y1 = p.y;
+      }
+      const blendshapes = {};
+      const cats = blendSets[i]?.categories;
+      if (cats) for (const c of cats) blendshapes[c.categoryName] = c.score;
+      faces.push({ landmarks, blendshapes, box: { x0, y0, x1, y1 } });
+    }
+    return faces;
   }
 
   close() {

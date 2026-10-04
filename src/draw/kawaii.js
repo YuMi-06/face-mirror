@@ -185,34 +185,37 @@ function drawMouth(ctx, m, pal, t) {
   ctx.restore();
 }
 
-export function draw(ctx, S, env) {
+export function draw(ctx, S, env, part) {
   const { W, H, t, pal } = env;
-  const g = ctx.createLinearGradient(0, 0, W * 0.3, H);
-  g.addColorStop(0, pal.bg);
-  g.addColorStop(1, pal.bg2);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
+  // part === 'features' 时只画五官、不铺背景：多人同框时背景只画一次
+  if (part !== 'features') {
+    const g = ctx.createLinearGradient(0, 0, W * 0.3, H);
+    g.addColorStop(0, pal.bg);
+    g.addColorStop(1, pal.bg2);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
 
-  // 缓慢漂浮的柔光斑
-  ctx.save();
-  for (let i = 0; i < 3; i++) {
-    const rr = Math.min(W, H) * (0.34 + i * 0.12);
-    const cx = W * 0.5 + Math.sin(t * 0.13 + i * 2.1) * W * 0.24;
-    const cy = H * 0.5 + Math.cos(t * 0.11 + i * 1.7) * H * 0.2;
-    const rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, rr);
-    rg.addColorStop(0, i % 2 ? `${pal.soft}bb` : `${pal.accent}33`);
-    rg.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = rg;
+    // 缓慢漂浮的柔光斑
+    ctx.save();
+    for (let i = 0; i < 3; i++) {
+      const rr = Math.min(W, H) * (0.34 + i * 0.12);
+      const cx = W * 0.5 + Math.sin(t * 0.13 + i * 2.1) * W * 0.24;
+      const cy = H * 0.5 + Math.cos(t * 0.11 + i * 1.7) * H * 0.2;
+      const rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, rr);
+      rg.addColorStop(0, i % 2 ? `${pal.soft}bb` : `${pal.accent}33`);
+      rg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = rg;
+      ctx.fillRect(0, 0, W, H);
+    }
+    ctx.restore();
+
+    // 头部光环
+    const halo = ctx.createRadialGradient(S.face.cx, S.face.cy, S.face.w * 0.2, S.face.cx, S.face.cy, S.face.w * 1.9);
+    halo.addColorStop(0, 'rgba(255,255,255,0.85)');
+    halo.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = halo;
     ctx.fillRect(0, 0, W, H);
   }
-  ctx.restore();
-
-  // 头部光环
-  const halo = ctx.createRadialGradient(S.face.cx, S.face.cy, S.face.w * 0.2, S.face.cx, S.face.cy, S.face.w * 1.9);
-  halo.addColorStop(0, 'rgba(255,255,255,0.85)');
-  halo.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = halo;
-  ctx.fillRect(0, 0, W, H);
 
   // 腮红
   const blush = clamp01(S.cheek.blush);

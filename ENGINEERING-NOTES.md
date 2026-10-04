@@ -57,6 +57,8 @@ node _tools/bundle.mjs src/main.js --check        # 打包产物语法自检
 node _tools/build_standalone.mjs                  # 重建单文件版
 
 node _tools/capture.mjs <页面URL> <y4m> _verify/shots   # 真实链路 + 逐画风姿态截图（31 张）
+node _tools/check_multi.mjs <页面URL> <两张脸的y4m> _verify/multi  # 多人：同框/画风独立/点击切换
+node _tools/diag_multi.mjs                       # 每人的脸框与五官是否自洽（这次的 X 串位就是它抓到的）
 node _tools/check_chooser.mjs <页面URL> <y4m> _verify/chooser  # 画风选择：自动弹出/点击生效/换人再弹
 node _tools/check_boot.mjs <httpURL> <fileURL> _verify/boot     # 启动状态与覆盖层
 node _tools/measure_load.mjs <URL>                # 载入耗时拆解（页内 performance.now 打点）
@@ -76,6 +78,8 @@ node _tools/check_truncated.mjs                   # 文档被截断时的表现
 - 严格 CSP（补 `wasm-unsafe-eval`）→ 正常就绪；不补 → 明确提示"这个窗口跑不了这个页面"。
 - 画风选择：人脸出现 → 自动弹出；四个格子的预览像素签名互不相同；真实鼠标点击生效；
   画面变黑 6.5 秒再恢复 → 当作"又来了一位"再次弹出。
+- 多人同框：两张脸各自一个会话；给其中一位换画风，另一位不变；点另一位 → 当前位切过去；
+  `diag_multi` 断言"每个人的眼/嘴都落在自己的脸框内"（这条断言就是抓出第 14 条 bug 的那一步）。
 
 ## 四、性能
 

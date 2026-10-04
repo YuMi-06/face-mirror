@@ -48,25 +48,27 @@ function drawBrow(ctx, br, pal) {
   ctx.restore();
 }
 
-export function draw(ctx, S, env) {
+export function draw(ctx, S, env, part) {
   const { W, H, t, pal } = env;
-  ctx.fillStyle = pal.bg;
-  ctx.fillRect(0, 0, W, H);
+  if (part !== 'features') {
+    ctx.fillStyle = pal.bg;
+    ctx.fillRect(0, 0, W, H);
 
-  // 背景构成：一个大圆 + 一条细环
-  const unit = Math.max(S.face.w, Math.min(W, H) * 0.22);
-  ctx.save();
-  ctx.globalAlpha = 0.5;
-  ctx.fillStyle = pal.soft;
-  ellipse(ctx, W * 0.5 + Math.sin(t * 0.16) * W * 0.06, H * 0.5, unit * 1.25, unit * 1.25);
-  ctx.fill();
-  ctx.globalAlpha = 0.35;
-  ctx.strokeStyle = pal.accent;
-  ctx.lineWidth = Math.max(2, unit * 0.012);
-  ctx.beginPath();
-  ctx.arc(W * 0.5, H * 0.5, unit * (1.55 + 0.02 * Math.sin(t * 0.5)), t * 0.25, t * 0.25 + Math.PI * 1.35);
-  ctx.stroke();
-  ctx.restore();
+    // 背景构成：一个大圆 + 一条细环
+    const unit = Math.max(S.face.w, Math.min(W, H) * 0.22);
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = pal.soft;
+    ellipse(ctx, W * 0.5 + Math.sin(t * 0.16) * W * 0.06, H * 0.5, unit * 1.25, unit * 1.25);
+    ctx.fill();
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = pal.accent;
+    ctx.lineWidth = Math.max(2, unit * 0.012);
+    ctx.beginPath();
+    ctx.arc(W * 0.5, H * 0.5, unit * (1.55 + 0.02 * Math.sin(t * 0.5)), t * 0.25, t * 0.25 + Math.PI * 1.35);
+    ctx.stroke();
+    ctx.restore();
+  }
 
   // 腮红：几道短横线（别画成斜线，会被读成眼泪/胡须）
   const blush = clamp01(S.cheek.blush + S.cheek.puff * 0.6);
