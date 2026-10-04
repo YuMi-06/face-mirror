@@ -44,6 +44,8 @@ const el = {
   sensVal: $('sensVal'),
   promptSeg: $('promptSeg'),
   pickStyle: $('pickStyle'),
+  freezeBtn: $('freeze'),
+  shotBtn: $('shot'),
   chooser: $('chooser'),
   chooserTitle: $('chooserTitle'),
   chooserSkip: $('chooserSkip'),
@@ -76,6 +78,10 @@ const app = {
   activeId: null,
   nextPersonId: 1,
   peopleOnScreen: 0,
+  /** 定格：true 时不再更新姿态（画面冻住），摄像头继续跑 */
+  frozen: false,
+  /** 拍照闪光的时间戳 */
+  flashUntil: 0,
 };
 
 /** 画风选择的弹出状态：谁坐到摄像头前，就给谁弹一次 */
@@ -173,6 +179,7 @@ function buildUi() {
     startCamera(app.deviceId).catch(reportCameraError);
   };
   $('shot').onclick = () => snapshot();
+  if (el.freezeBtn) el.freezeBtn.onclick = () => toggleFreeze();
   el.pickStyle.onclick = () => openChooser('manual');
   el.chooserSkip.onclick = () => closeChooser('skip');
   el.chooser.addEventListener('click', (e) => {
@@ -791,7 +798,8 @@ function frame(now) {
   if (dt > 0) app.fps = app.fps ? app.fps * 0.9 + (1 / dt) * 0.1 : 1 / dt;
 
   let faces = [];
-  if (app.tracker && app.modelReady && el.video.readyState >= 2) {
+  // 定格时不检测、不更新姿态：画面就冻在当前这一帧（摄像头还在播，但没人看它）
+  if (!app.frozen && app.tracker && app.modelReady && el.video.readyState >= 2) {
     if (el.video.currentTime !== app.lastVideoTime) {
       app.lastVideoTime = el.video.currentTime;
       try {
@@ -811,8 +819,7 @@ function frame(now) {
     app.settings.palette = app.people[0].palette;
     syncUi();
   }
-  trackPeople(faces, dt, now);
-
+  if (!app.frozen) trackPeople(faces, dt, now);
   const act = activePerson();
   app.state = act ? act.state : null;
   if (app.state && app.override) applyOverride(app.state, app.override);
@@ -833,6 +840,8 @@ function frame(now) {
     drawLandmarks(app.state);
   }
   drawPersonBadges();
+  if (app.frozen) drawFrozenOverlay();
+  drawFlash();
   if (ui.open && now - ui.lastPreview > 90) {
     ui.lastPreview = now;
     drawPreviews();
@@ -857,6 +866,11 @@ function updateStatus() {
   }
   if (!st) return;
   const n = app.people.filter((p) => p.box).length;
+  if (app.frozen) {
+    hideHint();
+    setStatus('warn', '已定格', `画面冻住了 · 空格或点「继续」恢复 · ${n > 0 ? n + ' 个人' : ''}`);
+    return;
+  }
   if (st.detected) {
     hideHint();
     const who = n > 1 ? `已识别到 ${n} 个人 · 当前第 ${app.people.findIndex((p) => p.id === app.activeId) + 1} 位` : '已识别到你的脸';
@@ -867,10 +881,65 @@ function updateStatus() {
   }
 }
 
-// ---------------------------------------------------------------- 截图
+// ---------------------------------------------------------------- 定格 / 截图
+/** 定格：把当前五官姿态冻在屏幕上（摄像头继续放着，但姿态不再更新）；再按一次恢复 */
+function toggleFreeze(force) {
+  app.frozen = force != null ? !!force : !app.frozen;
+  if (el.freezeBtn) el.freezeBtn.textContent = app.frozen ? '继续' : '定格';
+  if (el.freezeBtn) el.freezeBtn.classList.toggle('on', app.frozen);
+  if (!app.frozen) app.lastVideoTime = -1; // 恢复时立刻重新检测一次
+  toast(app.frozen ? '已定格 · 空格或点「继续」恢复' : '继续跟随');
+}
+
+/** 定格时的取景框 + 顶部提示（照片感） */
+function drawFrozenOverlay() {
+  ctx.save();
+  const m = 14;
+  ctx.setLineDash([]);
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(m, m, app.W - m * 2, app.H - m * 2);
+  ctx.strokeStyle = 'rgba(20,20,28,0.3)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(m + 5, m + 5, app.W - (m + 5) * 2, app.H - (m + 5) * 2);
+  const msg = '已定格 · 空格 / 点「继续」恢复';
+  ctx.font = '600 14px system-ui, "Microsoft YaHei", sans-serif';
+  const tw = ctx.measureText(msg).width;
+  ctx.fillStyle = 'rgba(18,18,26,0.78)';
+  ctx.beginPath();
+  // 放左上角：顶部正中是 toast、底部正中是多人提示，别互相压住
+  ctx.roundRect(m + 10, m + 12, tw + 32, 30, 15);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(msg, m + 26, m + 27);
+  ctx.restore();
+}
+
+/** 拍照时闪一下白光，让人知道拍到了 */
+function flash() {
+  app.flashUntil = performance.now() + 220;
+}
+
+function drawFlash() {
+  if (!app.flashUntil) return;
+  const left = app.flashUntil - performance.now();
+  if (left <= 0) {
+    app.flashUntil = 0;
+    return;
+  }
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, left / 220) * 0.75;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, app.W, app.H);
+  ctx.restore();
+}
+
 function snapshot() {
   const st = app.state;
   if (!st) return;
+  flash();
   const cv = document.createElement('canvas');
   cv.width = el.canvas.width;
   cv.height = el.canvas.height;
@@ -1162,6 +1231,16 @@ window.__fm = {
   clearOverride() {
     app.override = null;
   },
+  /** 定格 / 恢复（true = 定格） */
+  freeze(v) {
+    toggleFreeze(v);
+    return app.frozen;
+  },
+  /** 拍一张（和点按钮、按 S 一样） */
+  shoot() {
+    snapshot();
+    return true;
+  },
   setSettings(patch) {
     // style / palette 要走正常入口，否则不会记到"当前这个人"身上（多人时两边会串）
     const { style, palette, ...rest } = patch || {};
@@ -1249,6 +1328,7 @@ window.__fm = {
       joy: st?.mood.joy,
       chooserOpen: ui.open,
       appearance: ui.appearance,
+      frozen: !!app.frozen,
       view: st?.view,
     };
   },
@@ -1276,6 +1356,11 @@ window.addEventListener('keydown', (e) => {
   if (k === 'tab' && !ui.open) {
     e.preventDefault();
     cyclePerson();
+    return;
+  }
+  if (k === ' ' || k === 'spacebar' || e.code === 'Space') {
+    e.preventDefault();
+    toggleFreeze();
     return;
   }
   if (e.altKey && k >= '1' && k <= '8') {

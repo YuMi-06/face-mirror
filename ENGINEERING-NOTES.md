@@ -70,6 +70,13 @@
     不在 override 里 → 得支持 `o.sleepy` / `o.mood.sleepy`，否则测试里永远画成睡着的样子。
     回归：`node _tools/check_wink.mjs <URL> _verify/wink`（3 姿态 × 4 画风 = 12 张图）。
 
+19. **定格 = 只是"不喂新状态"，不是暂停渲染**：`app.frozen` 为真时 `frame()` 跳过
+    `detect()` 与 `trackPeople()`，画面继续用最后那份 state 重绘（背景的时间 `t` 照常走，
+    所以看起来还是活的）；恢复时把 `lastVideoTime` 置 -1 立刻重新检测一次。
+    ⚠️ 无头下**第一个鼠标点击 / 第一个键盘事件会被吞**（窗口刚获得焦点），
+    回归脚本必须"点到状态真的翻转为止 / 按到文件真的落盘为止"，否则会误判成功能坏了
+    （我就误判过一次）。回归：`node _tools/check_freeze.mjs <URL> <y4m> <out>`。
+
 ## 三、验证方式（不靠"没报错"下结论）
 
 改动后跑这些（需要能起无头浏览器）：
@@ -82,6 +89,8 @@ node _tools/build_standalone.mjs                  # 重建单文件版
 node _tools/capture.mjs <页面URL> <y4m> _verify/shots   # 真实链路 + 逐画风姿态截图（31 张）
 node _tools/check_multi.mjs <页面URL> <y4m> _verify/multi --expect 2  # 多人：同框/几何自洽/画风独立/点击切换
 #   很多人：python _tools/make_many_face_video.py 6 3  → face_many.y4m，再 --expect 5
+node _tools/check_freeze.mjs <页面URL> <y4m> _verify/freeze  # 定格冻住 / 拍照落盘 / 恢复跟随
+node _tools/check_wink.mjs <页面URL> _verify/wink            # 闭眼尖括号 `> <`（3 姿态 × 4 画风）
 node _tools/diag_multi.mjs                       # 每人的脸框与五官是否自洽（X 串位就是它抓到的）
 node _tools/check_chooser.mjs <页面URL> <y4m> _verify/chooser  # 画风选择：自动弹出/点击生效/换人再弹
 node _tools/check_boot.mjs <httpURL> <fileURL> _verify/boot     # 启动状态与覆盖层
