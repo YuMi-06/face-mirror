@@ -152,6 +152,12 @@ export const DEFAULT_SETTINGS = {
 /** 离开画面多久之后再出现，算「换了一个人」，重新弹一次画风选择 */
 export const NEW_FACE_ABSENCE_SEC = 5;
 
+/** 画面里超过这么多人时，新来的不再自动弹画风选择（会互相打断），改为提示按 C 自选 */
+export const CHOOSER_AUTO_MAX_PEOPLE = 3;
+
+/** 同时最多跟几张脸（要改的话同时改 track.js 里的 numFaces） */
+export const MAX_FACES = 8;
+
 export const VIDEO_CONSTRAINTS = {
   width: { ideal: 640 },
   height: { ideal: 480 },

@@ -63,7 +63,9 @@ async function waitForStandalone(timeoutMs = 5000) {
 
 const OPTIONS = {
   runningMode: 'VIDEO',
-  numFaces: 4, // 多人一起用：最多同时跟 4 张脸
+  // 多人一起用：同时能跟多少张脸。8 是实测比较稳的上限——每多一张脸就多跑一次关键点模型，
+  // 人数多时帧率会掉（界面右下角能看到 fps），想再加就改这个数（MediaPipe 允许更大，但会更慢）。
+  numFaces: 8,
   outputFaceBlendshapes: true,
   outputFacialTransformationMatrixes: false,
   minFaceDetectionConfidence: 0.4,

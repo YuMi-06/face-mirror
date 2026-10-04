@@ -46,6 +46,19 @@
     `checkWasmAllowed()` 用最小 wasm 模块试编译，失败就明确提示换浏览器打开。
 13. **错误提示自己把字吞了**：错误原文里含 ` on <script>`，直接塞 `innerHTML` 会被当成 HTML
     标签，把后面的文字全吃掉。所有动态文本都要先转义。
+14. **人脸中心被镜像了两次**（从第一版就存在，做多人同框才暴露）：
+    `S.face.cx = px(rawFaceCx)` 里的 `rawFaceCx` 已经是镜像后的值，而 `px()` 内部又做了
+    一次 `1 - n`，于是**脸框 / 腮红 / 光环 / 点击区域 / 画风预览的居中全跑到画面另一侧**
+    （Y 轴不镜像，所以一直没露馅；单人且脸在中间时也看不出来）。多人同框时表现为
+    "每个人的五官挂在别人身上"。修法：脸心就是「画面中心 + 偏移」，直接写 `W/2 + offX`。
+15. **新建会话时忘了触发"来了一位"**：多人改造后把"弹画风选择"挪进了 `onPersonArrived()`，
+    却只在"离开很久又回来"那条分支里调用，新面孔那条分支漏了 → 第一次出现人脸时不再弹窗。
+    **两条分支都要触发**。
+16. **人多了要克制**：8 个人挨个到达、每个都弹画风选择会互相打断 → 画面里超过 3 位时只提示
+    "按 `C` 给他选画风"。同理，点击框不能一直按"整张脸"画（人一多框子互相重叠），
+    改成**贴着五官**（两眼外侧到嘴下沿）算，既好看又点得准。
+17. `numFaces` 每多一张脸就多跑一次关键点模型：6 张脸在无头（软件渲染）下仍有 12–24 fps，
+    真机有 GPU 会更好。想再放宽就改 `src/track.js` 的 `numFaces`（界面上的 `MAX_FACES` 只是文案）。
 
 ## 三、验证方式（不靠"没报错"下结论）
 
@@ -57,8 +70,9 @@ node _tools/bundle.mjs src/main.js --check        # 打包产物语法自检
 node _tools/build_standalone.mjs                  # 重建单文件版
 
 node _tools/capture.mjs <页面URL> <y4m> _verify/shots   # 真实链路 + 逐画风姿态截图（31 张）
-node _tools/check_multi.mjs <页面URL> <两张脸的y4m> _verify/multi  # 多人：同框/画风独立/点击切换
-node _tools/diag_multi.mjs                       # 每人的脸框与五官是否自洽（这次的 X 串位就是它抓到的）
+node _tools/check_multi.mjs <页面URL> <y4m> _verify/multi --expect 2  # 多人：同框/几何自洽/画风独立/点击切换
+#   很多人：python _tools/make_many_face_video.py 6 3  → face_many.y4m，再 --expect 5
+node _tools/diag_multi.mjs                       # 每人的脸框与五官是否自洽（X 串位就是它抓到的）
 node _tools/check_chooser.mjs <页面URL> <y4m> _verify/chooser  # 画风选择：自动弹出/点击生效/换人再弹
 node _tools/check_boot.mjs <httpURL> <fileURL> _verify/boot     # 启动状态与覆盖层
 node _tools/measure_load.mjs <URL>                # 载入耗时拆解（页内 performance.now 打点）
@@ -78,8 +92,9 @@ node _tools/check_truncated.mjs                   # 文档被截断时的表现
 - 严格 CSP（补 `wasm-unsafe-eval`）→ 正常就绪；不补 → 明确提示"这个窗口跑不了这个页面"。
 - 画风选择：人脸出现 → 自动弹出；四个格子的预览像素签名互不相同；真实鼠标点击生效；
   画面变黑 6.5 秒再恢复 → 当作"又来了一位"再次弹出。
-- 多人同框：两张脸各自一个会话；给其中一位换画风，另一位不变；点另一位 → 当前位切过去；
-  `diag_multi` 断言"每个人的眼/嘴都落在自己的脸框内"（这条断言就是抓出第 14 条 bug 的那一步）。
+- 多人同框：**6 张脸**（`make_many_face_video.py 6 3` → `--expect 5`）各自一个会话，
+  四条断言全过 —— 同时跟住 ≥5 人 / 每个人的眼与嘴都落在自己的脸框内 / 给一位换画风其他人不变 /
+  真实鼠标点击能切换当前位。
 
 ## 四、性能
 

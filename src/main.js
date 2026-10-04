@@ -2,7 +2,7 @@
  * 主程序：摄像头 → 关键点 → 五官状态 → 画布，以及全部界面逻辑。
  * 离线运行：模型与 wasm 都来自 ../vendor。
  */
-import { PALETTES, STYLES, DEFAULT_SETTINGS, VIDEO_CONSTRAINTS, NEW_FACE_ABSENCE_SEC } from './config.js';
+import { PALETTES, STYLES, DEFAULT_SETTINGS, VIDEO_CONSTRAINTS, NEW_FACE_ABSENCE_SEC, CHOOSER_AUTO_MAX_PEOPLE, MAX_FACES } from './config.js';
 import { FaceTracker } from './track.js';
 import { SignalEngine } from './signals.js';
 import { render } from './draw/index.js';
@@ -592,13 +592,20 @@ function envOf(person) {
 
 /** 新面孔出现 / 离开 ≥5 秒又回来：都算"来了一位"，切到他并（按设置）弹画风选择 */
 function onPersonArrived(p, returning) {
+  const before = app.activeId;
   app.activeId = p.id;
   ui.appearance += 1;
   // 面板跟着切到这个人的设置
   app.settings.style = p.style;
   app.settings.palette = p.palette;
   syncUi();
-  if (app.settings.autoPrompt && !ui.open) openChooser(returning ? 'return' : 'auto');
+  if (!app.settings.autoPrompt) return;
+  // 人多了以后挨个弹窗会互相打断：画面里已经有好几位时，只提示一下，让他自己按 C 选
+  if (app.people.filter((x) => x.box).length > CHOOSER_AUTO_MAX_PEOPLE) {
+    if (!ui.open) toast('又来了一位 · 按 C 给他选画风');
+    return;
+  }
+  if (!ui.open) openChooser(returning ? 'return' : 'auto');
 }
 
 /**
@@ -664,20 +671,25 @@ function trackPeople(faces, dt, now) {
   app.peopleOnScreen = used.size;
 }
 
-/** 每个人在画布上的可点击范围（比画出来的五官略大一圈，好点） */
+/** 每个人在画布上的可点击范围：**贴着画出来的五官**，不是整张脸（人多了才不会互相压住） */
 function personRects() {
   const out = [];
   for (const p of app.people) {
     const st = p.state;
     if (!st || !p.box) continue;
-    const w = Math.max(st.face.w, 60);
-    const h = Math.max(st.face.h, 60);
+    const e0 = st.eyes[0];
+    const e1 = st.eyes[1];
+    if (!e0 || !e1) continue;
+    const eyeSpan = Math.abs(e0.x - e1.x);
+    const halfW = Math.max(eyeSpan * 0.8, e0.w * 1.9, 46); // 半宽：略宽于两眼外侧
+    const top = Math.min(e0.y, e1.y) - Math.max(e0.w * 1.4, 30); // 上沿盖住眉毛
+    const bottom = st.mouth.y + Math.max(st.mouth.w * 0.55, 26); // 下沿盖住嘴
     out.push({
       p,
-      x0: st.face.cx - w * 0.72,
-      y0: st.face.cy - h * 0.8,
-      x1: st.face.cx + w * 0.72,
-      y1: st.face.cy + h * 1.05,
+      x0: st.face.cx - halfW,
+      y0: top,
+      x1: st.face.cx + halfW,
+      y1: bottom,
     });
   }
   return out;
@@ -809,7 +821,10 @@ function frame(now) {
   if (act) {
     render(ctx, act.style, act.state, env, 'all'); // 背景 + 当前这位的五官
     const others = app.people.filter((p) => p !== act && p.box);
-    for (const p of others) drawPersonFeatures(p, 0.55, 0.82); // 其他人：缩小、半透明
+    // 人越多，其他人画得越小（不然同框时互相压住）
+    const k = others.length > 3 ? 0.4 : others.length > 1 ? 0.5 : 0.55;
+    const alpha = others.length > 3 ? 0.72 : 0.82;
+    for (const p of others) drawPersonFeatures(p, k, alpha); // 其他人：缩小、半透明
     if (others.length) drawPersonFeatures(act, 1, 1); // 当前这位再画一遍，压在最上层
   }
   drawPip(app.state, app.W, app.H);
@@ -848,7 +863,7 @@ function updateStatus() {
     setStatus('on', who, `${app.tracker?.delegate || '-'} · ${fps}fps · ${app.camInfo || ''}${n > 1 ? ' · 点画面里的人切换' : ''}`);
   } else {
     setStatus('warn', '没有看到脸', `${fps}fps · 把脸放进取景范围、光线亮一点`);
-    if (app.settings.showHint) showHint('把脸放进画面里，五官就会出现～');
+    if (app.settings.showHint) showHint(`把脸放进画面里，五官就会出现～（最多同时 ${MAX_FACES} 个人）`);
   }
 }
 
@@ -863,13 +878,14 @@ function snapshot() {
   c.setTransform(app.dpr, 0, 0, app.dpr, 0, 0);
   const act = activePerson();
   render(c, app.settings.style, st, { W: app.W, H: app.H, t: st.t, pal: PALETTES[app.settings.palette] });
-  // 多人同框时，其他几位也一起拍进去（缩小、半透明）
-  for (const p of app.people) {
-    if (p === act || !p.box || !p.state) continue;
+  // 多人同框时，其他几位也一起拍进去（缩小、半透明，和屏幕上一致）
+  const others = app.people.filter((p) => p !== act && p.box && p.state);
+  const kShot = others.length > 3 ? 0.4 : others.length > 1 ? 0.5 : 0.55;
+  for (const p of others) {
     c.save();
-    c.globalAlpha = 0.82;
+    c.globalAlpha = others.length > 3 ? 0.72 : 0.82;
     c.translate(p.state.face.cx, p.state.face.cy);
-    c.scale(0.55, 0.55);
+    c.scale(kShot, kShot);
     c.translate(-p.state.face.cx, -p.state.face.cy);
     render(c, p.style, p.state, { W: app.W, H: app.H, t: p.state.t, pal: PALETTES[p.palette] }, 'features');
     c.restore();
@@ -1261,7 +1277,7 @@ window.addEventListener('keydown', (e) => {
     cyclePerson();
     return;
   }
-  if (e.altKey && k >= '1' && k <= '4') {
+  if (e.altKey && k >= '1' && k <= '8') {
     const list = app.people.filter((p) => p.box);
     const target = list[Number(k) - 1];
     if (target) setActivePerson(target.id, { openPicker: false });
