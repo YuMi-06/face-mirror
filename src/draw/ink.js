@@ -19,32 +19,43 @@ function drawEye(ctx, e, pal, idx, o = {}) {
   ctx.rotate(e.tilt);
 
   if (open < 0.16) {
-    // 闭眼 = 眨眼：一道弯笔（wink 时拱得更高），再挑一撇睫毛
-    const arch = o.wink ? -R * 0.66 : -R * 0.42;
-    strokePath(ctx, sampleQuad({ x: -R * 1.05, y: R * 0.12 }, { x: 0, y: arch }, { x: R * 1.05, y: R * 0.12 }, 20), {
-      width: (t) => R * 0.26 * (0.35 + Math.sin(t * Math.PI) * 1.05),
-      color: pal.ink,
-      seed,
-      wobble: R * 0.02,
-    });
     if (o.wink) {
-      strokePath(ctx, sampleQuad({ x: R * 0.96, y: R * 0.04 }, { x: R * 1.2, y: -R * 0.2 }, { x: R * 1.44, y: -R * 0.08 }, 12), {
-        width: (t) => R * 0.15 * (0.4 + Math.sin(t * Math.PI)),
+      // 闭眼 = 尖括号（左眼 `>`、右眼 `<`）：两笔，尖端朝鼻子
+      const dir = o.apex != null && o.apex < 0 ? -1 : 1;
+      const ax = dir * R * 0.95;
+      const bx = -dir * R * 0.95;
+      const h = R * 0.72;
+      strokePath(ctx, sampleQuad({ x: bx, y: -h }, { x: bx + dir * R * 0.5, y: -h * 0.5 }, { x: ax, y: 0 }, 14), {
+        width: (t) => R * 0.26 * (0.35 + Math.sin(t * Math.PI) * 1.05),
         color: pal.ink,
-        seed: seed + 5,
+        seed,
+        wobble: R * 0.02,
+      });
+      strokePath(ctx, sampleQuad({ x: ax, y: 0 }, { x: bx + dir * R * 0.5, y: h * 0.5 }, { x: bx, y: h }, 14), {
+        width: (t) => R * 0.26 * (0.35 + Math.sin(t * Math.PI) * 1.05),
+        color: pal.ink,
+        seed: seed + 3,
         wobble: R * 0.02,
       });
       if (o.sparkle) {
-        // 单眼眨：点一颗小星
+        // 单眼闭：点一颗小星
         ctx.fillStyle = pal.accent;
         ctx.globalAlpha = 0.85;
-        ellipse(ctx, R * 1.62, -R * 0.72, R * 0.13, R * 0.13);
+        ellipse(ctx, dir * R * 1.5, -h * 1.1, R * 0.13, R * 0.13);
         ctx.fill();
-        ellipse(ctx, R * 1.42, -R * 0.92, R * 0.09, R * 0.09);
+        ellipse(ctx, dir * R * 1.3, -h * 1.35, R * 0.09, R * 0.09);
         ctx.fill();
-        ellipse(ctx, R * 1.82, -R * 0.92, R * 0.09, R * 0.09);
+        ellipse(ctx, dir * R * 1.7, -h * 1.35, R * 0.09, R * 0.09);
         ctx.fill();
       }
+    } else {
+      // 睡着：一道弯笔
+      strokePath(ctx, sampleQuad({ x: -R * 1.05, y: R * 0.12 }, { x: 0, y: -R * 0.42 }, { x: R * 1.05, y: R * 0.12 }, 20), {
+        width: (t) => R * 0.26 * (0.35 + Math.sin(t * Math.PI) * 1.05),
+        color: pal.ink,
+        seed,
+        wobble: R * 0.02,
+      });
     }
   } else {
     const ry = R * open;
@@ -210,10 +221,11 @@ export function draw(ctx, S, env, part) {
   }
   ctx.restore();
 
-  // 醒着时闭眼 = 眨个眼；只有一只眼闭着就是真的在 wink（给它加颗星）
+  // 醒着闭眼 = 尖括号：屏幕左边那只 `>`、右边那只 `<`；单眼闭（真 wink）加星
   const awake = S.sleepy < 0.5;
-  drawEye(ctx, S.eyes[0], pal, 0, { wink: awake, sparkle: awake && S.eyes[1].open > 0.4 });
-  drawEye(ctx, S.eyes[1], pal, 1, { wink: awake, sparkle: awake && S.eyes[0].open > 0.4 });
+  const apexOf = (e) => (e.x < S.face.cx ? 1 : -1);
+  drawEye(ctx, S.eyes[0], pal, 0, { wink: awake, apex: apexOf(S.eyes[0]), sparkle: awake && S.eyes[1].open > 0.4 });
+  drawEye(ctx, S.eyes[1], pal, 1, { wink: awake, apex: apexOf(S.eyes[1]), sparkle: awake && S.eyes[0].open > 0.4 });
 }
 
 export const meta = { id: 'ink', name: '水墨' };

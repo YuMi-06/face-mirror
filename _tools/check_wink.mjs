@@ -15,8 +15,8 @@ mkdirSync(OUT, { recursive: true });
 
 const FACE = 'face:{cx:0.5,cy:0.46,w:0.42,h:0.56},brows:[{y:0.30,lift:0.1},{y:0.30,lift:0.1}],nose:{x:0.5,y:0.47},mouth:{x:0.5,y:0.62,w:0.16,open:0.15,curve:0.3}';
 const POSES = {
-  '两眼都闭（眨眼）': `sleepy:0,mood:{sleepy:0},${FACE},eyes:[{open:0.02},{open:0.02}]`,
-  '只闭左眼（wink）': `sleepy:0,mood:{sleepy:0},${FACE},eyes:[{open:0.02},{open:1.0}]`,
+  '两眼都闭（大鱼号小于号）': `sleepy:0,mood:{sleepy:0},${FACE},eyes:[{open:0.02},{open:0.02}]`,
+  '只闭一只（单眼闭+星）': `sleepy:0,mood:{sleepy:0},${FACE},eyes:[{open:0.02},{open:1.0}]`,
   '睡着（没人在画面）': `sleepy:1,mood:{sleepy:1},${FACE},eyes:[{open:0.02},{open:0.02}]`,
 };
 const STYLES = ['kawaii', 'abstract', 'pixel', 'ink'];

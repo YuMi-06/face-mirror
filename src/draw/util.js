@@ -153,38 +153,35 @@ export function noiseTexture(W, H, { seed = 7, dots = 2600, alpha = 0.05, color 
 }
 
 /**
- * 闭眼 = 眨个眼（wink）：画一道向上的拱（^），再挑一撇睫毛；单眼眨时旁边加颗小星。
+ * 闭眼 = 一道尖括号：**左眼 `>`、右眼 `<`**（尖端都朝鼻子），合起来就是 `> <` 的挤眼表情。
  * 画在**局部坐标**（原点=眼睛中心），调用方自己 translate/rotate。
  * @param {number} w 眼睛宽度
- * @param {{color?:string, lw?:number, lash?:boolean, sparkle?:boolean, sparkColor?:string, arch?:number}} o
+ * @param {number} apex 尖端朝向：+1 = 朝右（`>`，用于左眼）；-1 = 朝左（`<`，用于右眼）
+ * @param {{color?:string, lw?:number, tall?:number, cap?:CanvasLineCap, sparkle?:boolean, sparkColor?:string}} o
  */
-export function drawWink(ctx, w, o = {}) {
-  const hw = Math.max(w / 2, 4);
-  const up = Math.max(hw * (o.arch != null ? o.arch : 0.5), 4); // 拱高
+export function drawChevron(ctx, w, apex, o = {}) {
+  const hw = Math.max(w / 2, 5);
+  const dir = apex >= 0 ? 1 : -1;
+  const h = Math.max(w * (o.tall != null ? o.tall : 0.42), 4); // 半高
+  const ax = dir * hw * 0.92; // 尖端
+  const bx = -dir * hw * 0.92; // 两个端头
   const color = o.color || '#2b2530';
-  const lw = Math.max(2.4, o.lw != null ? o.lw : w * 0.1);
+  const lw = Math.max(2.4, o.lw != null ? o.lw : w * 0.12);
   ctx.save();
   ctx.strokeStyle = color;
   ctx.lineWidth = lw;
-  ctx.lineCap = (o.cap || 'round');
+  ctx.lineCap = o.cap || 'round';
   ctx.lineJoin = 'round';
-  // 主拱：两端略低、中间抬起
   ctx.beginPath();
-  ctx.moveTo(-hw, up * 0.34);
-  ctx.quadraticCurveTo(0, -up * 1.2, hw, up * 0.34);
+  ctx.moveTo(bx, -h);
+  ctx.lineTo(ax, 0);
+  ctx.lineTo(bx, h);
   ctx.stroke();
-  if (o.lash !== false) {
-    // 外眼角一撇睫毛：一眼看出是"眨眼"而不是"睡着了"
-    ctx.beginPath();
-    ctx.moveTo(hw * 0.94, up * 0.3);
-    ctx.lineTo(hw * 1.34, -up * 0.1);
-    ctx.stroke();
-  }
   if (o.sparkle) {
-    // 真的在眨眼（一只闭一只睁）→ 加颗四角小星
-    const r = Math.max(3.2, w * 0.17);
-    const cx = hw * 1.5;
-    const cy = -up * 1.05;
+    // 只有一只眼闭（真的在 wink）→ 旁边点一颗四角小星
+    const r = Math.max(3.2, w * 0.16);
+    const cx = dir * hw * 1.5;
+    const cy = -h * 1.25;
     ctx.fillStyle = o.sparkColor || '#ffd166';
     ctx.beginPath();
     ctx.moveTo(cx, cy - r);
@@ -197,27 +194,17 @@ export function drawWink(ctx, w, o = {}) {
   ctx.restore();
 }
 
-/** 像素画的眨眼：三级台阶拼一个 ^（比圆滑曲线更像 8-bit） */
-export function drawWinkPixel(ctx, w, cell, color, sparkle) {
-  const step = Math.max(2, Math.round(cell));
-  const hw = Math.max(w / 2, step * 2);
-  ctx.save();
-  ctx.fillStyle = color;
-  const mid = Math.round(hw / step);
-  for (let i = -mid; i < mid; i++) {
-    const d = Math.abs(i + 0.5) / mid; // 0 中间 → 1 两端
-    const y = Math.round((d * 2.2 - 1.1) * step);
-    ctx.fillRect(Math.round(i * step), y, step, step);
-  }
-  if (sparkle) {
-    const r = step;
-    ctx.fillStyle = '#ffd166';
-    ctx.fillRect(Math.round(hw + r), Math.round(-step * 2.4), r, r);
-    ctx.fillRect(Math.round(hw + r * 2), Math.round(-step * 1.4), r, r);
-    ctx.fillRect(Math.round(hw), Math.round(-step * 1.4), r, r);
-    ctx.fillRect(Math.round(hw + r), Math.round(-step * 0.4), r, r);
-  }
-  ctx.restore();
+/** 像素画的尖括号闭眼：5 行 × 3 列的台阶（左眼 `>`、右眼 `<`） */
+export function chevronPixelOffsets(apex) {
+  const dir = apex >= 0 ? 1 : -1;
+  const pts = [
+    [0, -2],
+    [1, -1],
+    [2, 0],
+    [1, 1],
+    [0, 2],
+  ];
+  return pts.map(([c, r]) => [dir >= 0 ? c : 2 - c, r]);
 }
 
 /** 睡着时的 z z z（所有画风共用） */

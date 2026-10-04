@@ -1,5 +1,5 @@
 /** 像素风：格子对齐的方块五官 + CRT 质感 */
-import { clamp01 } from './util.js';
+import { clamp01, chevronPixelOffsets } from './util.js';
 
 let scanCache = null;
 
@@ -82,19 +82,19 @@ export function draw(ctx, S, env, part) {
     const ox = snap(e.x) - cell * 2;
     const oy = snap(e.y) - cell * 1.5;
     const awake = S.sleepy < 0.5;
-    const wink = awake && open < 0.18; // 醒着闭眼 = 眨眼
-    const sparkle = wink && S.eyes[1 - i].open > 0.4; // 单眼眨 → 加星
+    const wink = awake && open < 0.18; // 醒着闭眼 = 尖括号
+    const sparkle = wink && S.eyes[1 - i].open > 0.4; // 单眼闭 → 加星
+    const apex = e.x < S.face.cx ? 1 : -1; // 左眼 `>`、右眼 `<`
     if (open < 0.18) {
       if (wink) {
-        // 像素版眨眼：五格台阶拼一个 ^（中间高、两端低）+ 外眼角一撇睫毛
-        const lift = [[0, 1], [1, 0], [2, -1], [3, 0], [4, 1]];
-        for (const [c, d] of lift) block(ox + c * cell, oy + (1 + d) * cell, cell, cell, ink);
-        block(ox + (e.side > 0 ? 5 : -1) * cell, oy, cell, cell, ink);
+        // 像素版尖括号：5 行 × 3 列的台阶
+        for (const [c, r] of chevronPixelOffsets(apex)) block(ox + (c + 1) * cell, oy + (r + 2) * cell, cell, cell, ink);
         if (sparkle) {
-          block(ox + 7 * cell, oy - cell, cell, cell, pal.pop);
-          block(ox + 6 * cell, oy - 2 * cell, cell, cell, pal.pop);
-          block(ox + 8 * cell, oy - 2 * cell, cell, cell, pal.pop);
-          block(ox + 7 * cell, oy - 3 * cell, cell, cell, pal.pop);
+          const sx = ox + (apex >= 0 ? 5 : -1) * cell;
+          block(sx, oy, cell, cell, pal.pop);
+          block(sx - cell, oy - cell, cell, cell, pal.pop);
+          block(sx + cell, oy - cell, cell, cell, pal.pop);
+          block(sx, oy - 2 * cell, cell, cell, pal.pop);
         }
       } else {
         // 睡着：一条直线
