@@ -208,7 +208,14 @@ export class SignalEngine {
 
     S.view = { W, H, S: scalePx, Sy: scalePy, offX, offY, aspect, faceCx: rawFaceCx, faceCy: rawFaceCy, follow, mirror: true };
 
-    const roll = Math.atan2(py(cB.y) - py(cA.y), px(cB.x) - px(cA.x));
+    // 眼睛的倾斜角：用两只眼心连线在**画布**上的方向。
+    // ⚠️ px() 里已经做过镜像（1 - n），镜像视图下 cB 会跑到 cA 左边 → atan2 得到接近 ±π 的角度，
+    //    于是每只眼都被旋转 180°：对称的眼睛看不出来，但**睫毛会跑到内眼角、瞳孔上下左右全反、
+    //    闭眼的尖括号 `> <` 整个翻过来**（用户就是看到这个才发现）。眼睛连线基本是水平的，
+    //    所以把角度折到 (-π/2, π/2] 就对了。
+    let roll = Math.atan2(py(cB.y) - py(cA.y), px(cB.x) - px(cA.x));
+    if (roll > Math.PI / 2) roll -= Math.PI;
+    else if (roll < -Math.PI / 2) roll += Math.PI;
 
     // ---- 眼 --------------------------------------------------------------
     const makeEye = (i, cfg, center, blinkName, wideName, squintName, side) => {

@@ -1278,7 +1278,7 @@ window.__fm = {
           active: p.id === app.activeId,
           faceW: st ? Math.round(st.face.w) : 0,
           face: st ? { cx: Math.round(st.face.cx), cy: Math.round(st.face.cy), w: Math.round(st.face.w), h: Math.round(st.face.h) } : null,
-          eyes: st ? st.eyes.map((e) => ({ x: Math.round(e.x), y: Math.round(e.y), w: Math.round(e.w), open: +e.open.toFixed(2) })) : null,
+          eyes: st ? st.eyes.map((e) => ({ x: Math.round(e.x), y: Math.round(e.y), w: Math.round(e.w), open: +e.open.toFixed(2), tilt: +e.tilt.toFixed(3), side: e.side })) : null,
           mouth: st ? { x: Math.round(st.mouth.x), y: Math.round(st.mouth.y), w: Math.round(st.mouth.w) } : null,
           detected: st ? st.detected : false,
           dbg: p.dbg || null,

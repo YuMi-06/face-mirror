@@ -77,6 +77,16 @@
     回归脚本必须"点到状态真的翻转为止 / 按到文件真的落盘为止"，否则会误判成功能坏了
     （我就误判过一次）。回归：`node _tools/check_freeze.mjs <URL> <y4m> <out>`。
 
+20. **眼睛被整体旋转了 180°（从第一版就存在，做尖括号闭眼才暴露）**：
+    `roll = Math.atan2(py(cB) - py(cA), px(cB.x) - px(cA.x))` 里的 `px()` **已经做过镜像**
+    （`1 - n`），镜像视图下 cB 会跑到 cA 左边 → `dx < 0` → `atan2` 得到接近 **±π** 的角度。
+    后果：每只眼被 `ctx.rotate(π)` 翻转 —— 对称的眼睛看不出来，但
+    **睫毛画到了内眼角、`gazeX/gazeY` 完全反了（往左看瞳孔往右跑）、闭眼的 `> <` 整个左右颠倒**
+    （用户就是看到最后这条来报的）。修法：眼睛连线基本水平，把角度折到 `(-π/2, π/2]`：
+    `if (roll > π/2) roll -= π; else if (roll < -π/2) roll += π;`
+    回归：`node _tools/check_eye_tilt.mjs <URL> <y4m> <out>`（断言真实链路两眼 `|tilt| < 0.35`，
+    修之前是 π；再强制闭眼拍四种画风确认 `> <` 方向）。
+
 ## 三、验证方式（不靠"没报错"下结论）
 
 改动后跑这些（需要能起无头浏览器）：
@@ -90,6 +100,7 @@ node _tools/capture.mjs <页面URL> <y4m> _verify/shots   # 真实链路 + 逐�
 node _tools/check_multi.mjs <页面URL> <y4m> _verify/multi --expect 2  # 多人：同框/几何自洽/画风独立/点击切换
 #   很多人：python _tools/make_many_face_video.py 6 3  → face_many.y4m，再 --expect 5
 node _tools/check_freeze.mjs <页面URL> <y4m> _verify/freeze  # 定格冻住 / 拍照落盘 / 恢复跟随
+node _tools/check_eye_tilt.mjs <页面URL> <y4m> _verify/tilt  # 眼睛倾斜角（防"被翻 180°"回归）
 node _tools/check_wink.mjs <页面URL> _verify/wink            # 闭眼尖括号 `> <`（3 姿态 × 4 画风）
 node _tools/diag_multi.mjs                       # 每人的脸框与五官是否自洽（X 串位就是它抓到的）
 node _tools/check_chooser.mjs <页面URL> <y4m> _verify/chooser  # 画风选择：自动弹出/点击生效/换人再弹
