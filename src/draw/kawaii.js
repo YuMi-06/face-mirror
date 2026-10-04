@@ -1,5 +1,5 @@
 /** 可爱风：大眼睛 + 双高光 + 腮红 + 猫嘴 */
-import { clamp01, smoothstep, ellipse, roundRect, sampleQuad, strokePath, sparkle } from './util.js';
+import { clamp01, smoothstep, ellipse, roundRect, sampleQuad, strokePath, sparkle, drawWink } from './util.js';
 
 function eyeClosedArc(ctx, w, h, lw, color) {
   ctx.beginPath();
@@ -10,12 +10,33 @@ function eyeClosedArc(ctx, w, h, lw, color) {
   ctx.stroke();
 }
 
-function drawEye(ctx, e, pal) {
+function drawEye(ctx, e, pal, o = {}) {
   const w = Math.max(e.w * 1.2, 6);
   const openC = clamp01(e.open);
   const joyK = smoothstep(0.42, 0.85, e.joy) * smoothstep(0.2, 0.6, openC);
   const h = Math.max(w * 0.92 * openC, w * 0.05);
   const lw = Math.max(2.4, w * 0.085);
+
+  // ---- 闭眼：眨个眼（拱 + 睫毛，单眼眨时加颗星）----
+  if (openC < 0.14) {
+    ctx.save();
+    ctx.translate(e.x, e.y);
+    ctx.rotate(e.tilt);
+    if (o.wink) {
+      drawWink(ctx, w, { color: pal.ink, lw: lw * 1.25, sparkle: !!o.sparkle });
+    } else {
+      // 睡着时还是老实的一条线，跟"眨眼"区分开
+      ctx.beginPath();
+      ctx.moveTo(-w * 0.5, 0);
+      ctx.lineTo(w * 0.5, 0);
+      ctx.strokeStyle = pal.ink;
+      ctx.lineWidth = lw * 1.3;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
 
   ctx.save();
   ctx.translate(e.x, e.y);
@@ -251,8 +272,10 @@ export function draw(ctx, S, env, part) {
   ctx.restore();
 
   drawMouth(ctx, S.mouth, pal, t);
-  drawEye(ctx, S.eyes[0], pal);
-  drawEye(ctx, S.eyes[1], pal);
+  // 醒着时闭眼 = 眨个眼；只有一只眼闭着就是真的在 wink，给它加颗星
+  const awake = S.sleepy < 0.5;
+  drawEye(ctx, S.eyes[0], pal, { wink: awake, sparkle: awake && S.eyes[1].open > 0.4 });
+  drawEye(ctx, S.eyes[1], pal, { wink: awake, sparkle: awake && S.eyes[0].open > 0.4 });
 
   // 惊讶小星星
   if (S.mood.surprise > 0.45) {

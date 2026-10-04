@@ -10,7 +10,7 @@ function ellPts(cx, cy, rx, ry, a0, a1, n = 26) {
   return out;
 }
 
-function drawEye(ctx, e, pal, idx) {
+function drawEye(ctx, e, pal, idx, o = {}) {
   const R = Math.max(e.w * 0.6, 9);
   const open = clamp01(e.open);
   const seed = 1000 + idx * 37;
@@ -19,13 +19,33 @@ function drawEye(ctx, e, pal, idx) {
   ctx.rotate(e.tilt);
 
   if (open < 0.16) {
-    // 闭眼：一道弯笔
-    strokePath(ctx, sampleQuad({ x: -R * 1.05, y: R * 0.12 }, { x: 0, y: -R * 0.42 }, { x: R * 1.05, y: R * 0.12 }, 20), {
+    // 闭眼 = 眨眼：一道弯笔（wink 时拱得更高），再挑一撇睫毛
+    const arch = o.wink ? -R * 0.66 : -R * 0.42;
+    strokePath(ctx, sampleQuad({ x: -R * 1.05, y: R * 0.12 }, { x: 0, y: arch }, { x: R * 1.05, y: R * 0.12 }, 20), {
       width: (t) => R * 0.26 * (0.35 + Math.sin(t * Math.PI) * 1.05),
       color: pal.ink,
       seed,
       wobble: R * 0.02,
     });
+    if (o.wink) {
+      strokePath(ctx, sampleQuad({ x: R * 0.96, y: R * 0.04 }, { x: R * 1.2, y: -R * 0.2 }, { x: R * 1.44, y: -R * 0.08 }, 12), {
+        width: (t) => R * 0.15 * (0.4 + Math.sin(t * Math.PI)),
+        color: pal.ink,
+        seed: seed + 5,
+        wobble: R * 0.02,
+      });
+      if (o.sparkle) {
+        // 单眼眨：点一颗小星
+        ctx.fillStyle = pal.accent;
+        ctx.globalAlpha = 0.85;
+        ellipse(ctx, R * 1.62, -R * 0.72, R * 0.13, R * 0.13);
+        ctx.fill();
+        ellipse(ctx, R * 1.42, -R * 0.92, R * 0.09, R * 0.09);
+        ctx.fill();
+        ellipse(ctx, R * 1.82, -R * 0.92, R * 0.09, R * 0.09);
+        ctx.fill();
+      }
+    }
   } else {
     const ry = R * open;
     // 眼白淡墨
@@ -190,8 +210,10 @@ export function draw(ctx, S, env, part) {
   }
   ctx.restore();
 
-  drawEye(ctx, S.eyes[0], pal, 0);
-  drawEye(ctx, S.eyes[1], pal, 1);
+  // 醒着时闭眼 = 眨个眼；只有一只眼闭着就是真的在 wink（给它加颗星）
+  const awake = S.sleepy < 0.5;
+  drawEye(ctx, S.eyes[0], pal, 0, { wink: awake, sparkle: awake && S.eyes[1].open > 0.4 });
+  drawEye(ctx, S.eyes[1], pal, 1, { wink: awake, sparkle: awake && S.eyes[0].open > 0.4 });
 }
 
 export const meta = { id: 'ink', name: '水墨' };

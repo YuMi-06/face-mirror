@@ -152,6 +152,74 @@ export function noiseTexture(W, H, { seed = 7, dots = 2600, alpha = 0.05, color 
   return cv;
 }
 
+/**
+ * 闭眼 = 眨个眼（wink）：画一道向上的拱（^），再挑一撇睫毛；单眼眨时旁边加颗小星。
+ * 画在**局部坐标**（原点=眼睛中心），调用方自己 translate/rotate。
+ * @param {number} w 眼睛宽度
+ * @param {{color?:string, lw?:number, lash?:boolean, sparkle?:boolean, sparkColor?:string, arch?:number}} o
+ */
+export function drawWink(ctx, w, o = {}) {
+  const hw = Math.max(w / 2, 4);
+  const up = Math.max(hw * (o.arch != null ? o.arch : 0.5), 4); // 拱高
+  const color = o.color || '#2b2530';
+  const lw = Math.max(2.4, o.lw != null ? o.lw : w * 0.1);
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lw;
+  ctx.lineCap = (o.cap || 'round');
+  ctx.lineJoin = 'round';
+  // 主拱：两端略低、中间抬起
+  ctx.beginPath();
+  ctx.moveTo(-hw, up * 0.34);
+  ctx.quadraticCurveTo(0, -up * 1.2, hw, up * 0.34);
+  ctx.stroke();
+  if (o.lash !== false) {
+    // 外眼角一撇睫毛：一眼看出是"眨眼"而不是"睡着了"
+    ctx.beginPath();
+    ctx.moveTo(hw * 0.94, up * 0.3);
+    ctx.lineTo(hw * 1.34, -up * 0.1);
+    ctx.stroke();
+  }
+  if (o.sparkle) {
+    // 真的在眨眼（一只闭一只睁）→ 加颗四角小星
+    const r = Math.max(3.2, w * 0.17);
+    const cx = hw * 1.5;
+    const cy = -up * 1.05;
+    ctx.fillStyle = o.sparkColor || '#ffd166';
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - r);
+    ctx.quadraticCurveTo(cx + r * 0.16, cy - r * 0.16, cx + r, cy);
+    ctx.quadraticCurveTo(cx + r * 0.16, cy + r * 0.16, cx, cy + r);
+    ctx.quadraticCurveTo(cx - r * 0.16, cy + r * 0.16, cx - r, cy);
+    ctx.quadraticCurveTo(cx - r * 0.16, cy - r * 0.16, cx, cy - r);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** 像素画的眨眼：三级台阶拼一个 ^（比圆滑曲线更像 8-bit） */
+export function drawWinkPixel(ctx, w, cell, color, sparkle) {
+  const step = Math.max(2, Math.round(cell));
+  const hw = Math.max(w / 2, step * 2);
+  ctx.save();
+  ctx.fillStyle = color;
+  const mid = Math.round(hw / step);
+  for (let i = -mid; i < mid; i++) {
+    const d = Math.abs(i + 0.5) / mid; // 0 中间 → 1 两端
+    const y = Math.round((d * 2.2 - 1.1) * step);
+    ctx.fillRect(Math.round(i * step), y, step, step);
+  }
+  if (sparkle) {
+    const r = step;
+    ctx.fillStyle = '#ffd166';
+    ctx.fillRect(Math.round(hw + r), Math.round(-step * 2.4), r, r);
+    ctx.fillRect(Math.round(hw + r * 2), Math.round(-step * 1.4), r, r);
+    ctx.fillRect(Math.round(hw), Math.round(-step * 1.4), r, r);
+    ctx.fillRect(Math.round(hw + r), Math.round(-step * 0.4), r, r);
+  }
+  ctx.restore();
+}
+
 /** 睡着时的 z z z（所有画风共用） */
 export function drawSleepZs(ctx, S, pal, t) {
   const k = S.mood.sleepy;

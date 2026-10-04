@@ -925,6 +925,7 @@ function applyOverride(S, o) {
   const fcx = S.face.cx || defFace.cx * W;
   const fcy = S.face.cy || defFace.cy * H;
   const fw = S.face.w || defFace.w;
+  if (o.sleepy != null) S.sleepy = o.sleepy; // 离线核对用：强制"醒着"，否则闭眼会被当成睡着
   if (o.eyes) {
     o.eyes.forEach((e, i) => {
       const t = S.eyes[i];

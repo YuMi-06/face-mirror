@@ -77,12 +77,29 @@ export function draw(ctx, S, env, part) {
     [1, 1, 1, 1, 1],
     [0, 1, 1, 1, 0],
   ];
-  S.eyes.forEach((e) => {
+  S.eyes.forEach((e, i) => {
     const open = clamp01(e.open);
     const ox = snap(e.x) - cell * 2;
     const oy = snap(e.y) - cell * 1.5;
+    const awake = S.sleepy < 0.5;
+    const wink = awake && open < 0.18; // 醒着闭眼 = 眨眼
+    const sparkle = wink && S.eyes[1 - i].open > 0.4; // 单眼眨 → 加星
     if (open < 0.18) {
-      for (let i = 0; i < 5; i++) block(ox + i * cell, oy + cell, cell, cell, ink);
+      if (wink) {
+        // 像素版眨眼：五格台阶拼一个 ^（中间高、两端低）+ 外眼角一撇睫毛
+        const lift = [[0, 1], [1, 0], [2, -1], [3, 0], [4, 1]];
+        for (const [c, d] of lift) block(ox + c * cell, oy + (1 + d) * cell, cell, cell, ink);
+        block(ox + (e.side > 0 ? 5 : -1) * cell, oy, cell, cell, ink);
+        if (sparkle) {
+          block(ox + 7 * cell, oy - cell, cell, cell, pal.pop);
+          block(ox + 6 * cell, oy - 2 * cell, cell, cell, pal.pop);
+          block(ox + 8 * cell, oy - 2 * cell, cell, cell, pal.pop);
+          block(ox + 7 * cell, oy - 3 * cell, cell, cell, pal.pop);
+        }
+      } else {
+        // 睡着：一条直线
+        for (let k = 0; k < 5; k++) block(ox + k * cell, oy + cell, cell, cell, ink);
+      }
     } else {
       const hRows = open > 0.55 ? 4 : 3;
       for (let r = 0; r < hRows; r++) {

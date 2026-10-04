@@ -1,11 +1,11 @@
 /** 抽象风：几何块面 + 粗描边，包豪斯式的五官 */
-import { clamp01, ellipse, roundRect, sampleQuad, strokePath } from './util.js';
+import { clamp01, ellipse, roundRect, sampleQuad, strokePath, drawWink } from './util.js';
 
 function capsule(ctx, x, y, w, h) {
   roundRect(ctx, x - w / 2, y - h / 2, w, h, Math.min(w, h) / 2);
 }
 
-function drawEye(ctx, e, pal) {
+function drawEye(ctx, e, pal, o = {}) {
   const R = Math.max(e.w * 0.56, 8);
   const lw = Math.max(3, R * 0.18);
   const open = clamp01(e.open);
@@ -17,10 +17,16 @@ function drawEye(ctx, e, pal) {
   ctx.lineCap = 'round';
 
   if (open < 0.14) {
-    ctx.beginPath();
-    ctx.moveTo(-R * 1.08, 0);
-    ctx.lineTo(R * 1.08, 0);
-    ctx.stroke();
+    if (o.wink) {
+      // 闭眼 → 眨眼：一道拱 + 睫毛（单眼眨时加星）
+      drawWink(ctx, R * 2.16, { color: pal.ink, lw, sparkle: !!o.sparkle });
+    } else {
+      // 睡着：还是老实的一道横线
+      ctx.beginPath();
+      ctx.moveTo(-R * 1.08, 0);
+      ctx.lineTo(R * 1.08, 0);
+      ctx.stroke();
+    }
   } else {
     const ry = R * open;
     ellipse(ctx, 0, 0, R, ry, e.tilt * 0);
@@ -148,8 +154,10 @@ export function draw(ctx, S, env, part) {
   }
   ctx.restore();
 
-  drawEye(ctx, S.eyes[0], pal);
-  drawEye(ctx, S.eyes[1], pal);
+  // 醒着时闭眼 = 眨个眼（wink）；只有一只眼闭着就是真的在眨眼，给它加颗星
+  const awake = S.sleepy < 0.5;
+  drawEye(ctx, S.eyes[0], pal, { wink: awake, sparkle: awake && S.eyes[1].open > 0.4 });
+  drawEye(ctx, S.eyes[1], pal, { wink: awake, sparkle: awake && S.eyes[0].open > 0.4 });
 }
 
 export const meta = { id: 'abstract', name: '抽象' };
