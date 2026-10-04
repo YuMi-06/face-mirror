@@ -87,6 +87,21 @@
     回归：`node _tools/check_eye_tilt.mjs <URL> <y4m> <out>`（断言真实链路两眼 `|tilt| < 0.35`，
     修之前是 π；再强制闭眼拍四种画风确认 `> <` 方向）。
 
+21. **手机内置浏览器里"一直在载入"却没说是哪一步**（用户用**抖音内置浏览器**打开，
+    20 秒后只看到"模型没有载入完成"，手机上又按不了 F12）。三处改动：
+    ① **wasm 与模型改成自己下载**（`fetchBytes()` 带 `ReadableStream` 进度），再用和单文件版
+    相同的方式交给 MediaPipe（`wasmLoaderPath=''` + `Module.wasmBinary` + `modelAssetBuffer`）——
+    这样每一步都可观测、可单独报错；SIMD 也用 `WebAssembly.validate(...)` 自己判断后选胶水层。
+    ② **把当前阶段/进度显示在启动胶囊上**（`window.__fmLoading`，每 100ms 刷新），
+    超时面板附上"卡在：下载 · 已下载 9.13/13 MB"、协议、视口、UA —— 截图即可定位。
+    ③ **超时从 20 秒改成 45 秒并给"继续等一会儿"**，且**已经弹出的具体报错不再被看门狗覆盖**
+    （原先 45 秒那条会把 `人脸模型下载失败：Failed to fetch` 盖成"模型还在下载"）。
+    顺带：**"建任务"加了 20/30 秒超时并回退 CPU**（手机 WebView 申请不到 GPU 上下文时会一直等，
+    既不报错也不返回）；`ctx.roundRect` 加了 polyfill（iOS<16 / 旧 WebView 缺它 → 每帧抛错 → 黑屏）；
+    窄屏自动收起面板、画风选择单列（原来 2×264px 在手机上溢出）；触摸时补一次摄像头启动（iOS 手势要求）。
+    回归：`node _tools/check_mobile.mjs <URL> [y4m] <out> --ua douyin|wechat`（手机尺寸 + 触摸 + 手机 UA，
+    断言就绪/面板收起/单列/无异常）；`--block` 用它拦掉模型下载，断言页面能自己说清卡在哪。
+
 ## 三、验证方式（不靠"没报错"下结论）
 
 改动后跑这些（需要能起无头浏览器）：
@@ -100,6 +115,8 @@ node _tools/capture.mjs <页面URL> <y4m> _verify/shots   # 真实链路 + 逐�
 node _tools/check_multi.mjs <页面URL> <y4m> _verify/multi --expect 2  # 多人：同框/几何自洽/画风独立/点击切换
 #   很多人：python _tools/make_many_face_video.py 6 3  → face_many.y4m，再 --expect 5
 node _tools/check_freeze.mjs <页面URL> <y4m> _verify/freeze  # 定格冻住 / 拍照落盘 / 恢复跟随
+node _tools/check_mobile.mjs <页面URL> [y4m] _verify/mobile --ua douyin  # 手机尺寸+触摸+手机 UA
+node _tools/check_mobile.mjs <页面URL> _verify/mobile --ua wechat --block  # 拦住模型下载，验证自诊断
 node _tools/check_eye_tilt.mjs <页面URL> <y4m> _verify/tilt  # 眼睛倾斜角（防"被翻 180°"回归）
 node _tools/check_wink.mjs <页面URL> _verify/wink            # 闭眼尖括号 `> <`（3 姿态 × 4 画风）
 node _tools/diag_multi.mjs                       # 每人的脸框与五官是否自洽（X 串位就是它抓到的）

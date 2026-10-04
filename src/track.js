@@ -73,8 +73,99 @@ const OPTIONS = {
   minTrackingConfidence: 0.4,
 };
 
-export class FaceTracker {
-  constructor() {
+/** 当前浏览器能不能编译 WebAssembly SIMD —— MediaPipe 有 SIMD / 非 SIMD 两份 wasm，选错就起不来 */
+function supportsSimd() {
+  try {
+    return WebAssembly.validate(
+      new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** 把"当前卡在哪一步"写到页面上（手机上没控制台，只能靠它） */
+function stage(name, note) {
+  globalThis.__fmLoading = { ...(globalThis.__fmLoading || {}), stage: name, note: note || '' };
+  try {
+    globalThis.__fmStageHook && globalThis.__fmStageHook(globalThis.__fmLoading);
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/**
+ * 自己下载（带进度）。
+ * 不用 MediaPipe 内部的加载：它把"脚本 → wasm → 模型"三步藏在里面，任何一步慢或被拦，
+ * 外面只看到"一直在载入"，不知道卡在哪。自己下还能单独重试、报准确的 HTTP 状态。
+ */
+async function fetchBytes(url, key, label) {
+  const t0 = performance.now();
+  stage('下载', `正在下载${label}…`);
+  let res;
+  try {
+    res = await fetch(url);
+  } catch (e) {
+    throw new Error(`${label}下载失败（网络被拦？）：${(e && e.message) || e}`);
+  }
+  if (!res.ok) throw new Error(`${label}下载失败：HTTP ${res.status}`);
+  const total = Number(res.headers.get('content-length')) || 0;
+  let bytes;
+  if (res.body && res.body.getReader) {
+    const reader = res.body.getReader();
+    const chunks = [];
+    let got = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      got += value.length;
+      globalThis.__fmLoading = { ...(globalThis.__fmLoading || {}), stage: '下载', note: `正在下载${label}…`, key, got, total };
+      try {
+        globalThis.__fmStageHook && globalThis.__fmStageHook(globalThis.__fmLoading);
+      } catch {
+        /* 忽略 */
+      }
+    }
+    bytes = new Uint8Array(got);
+    let off = 0;
+    for (const c of chunks) {
+      bytes.set(c, off);
+      off += c.length;
+    }
+  } else {
+    bytes = new Uint8Array(await res.arrayBuffer());
+  }
+  const T = (globalThis.__fmTimings = globalThis.__fmTimings || {});
+  T[key + 'Ms'] = Math.round(performance.now() - t0);
+  T[key + 'Bytes'] = bytes.length;
+  return bytes;
+}
+
+/** 加载普通 <script>（**不带 crossorigin**：file:// 与部分手机 WebView 下带 crossorigin 会被拦） */
+function loadClassicScript(url, label) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = url;
+    s.async = false;
+    s.onload = () => res();
+    s.onerror = () => rej(new Error(`${label}加载失败：${url}`));
+    document.head.appendChild(s);
+  });
+}
+
+/** 给"建任务"加超时：手机上申请不到 GPU 上下文时会**一直等**，不报错也不返回 */
+function withTimeout(promise, ms, what) {
+  let timer = 0;
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise((_, rej) => {
+      timer = setTimeout(() => rej(new Error(`${what}（等了 ${Math.round(ms / 1000)} 秒）`)), ms);
+    }),
+  ]);
+}
+
+export class FaceTracker {  constructor() {
     this.landmarker = null;
     this.delegate = 'GPU';
     /** @type {number} 上一次成功检测的时间戳，用于诊断 */
@@ -114,10 +205,28 @@ export class FaceTracker {
       };
       baseOptions = { modelAssetBuffer: modelBytes, delegate: 'GPU' };
     } else {
-      // 源码 / 本机服务模式：wasm 与模型都从 vendor/ 取（这里的 baseURI 一定是可用的 http://）
-      baseOptions = { modelAssetPath: vendorUrl('vendor/models/face_landmarker.task'), delegate: 'GPU' };
-      this.filesetOverride = null;
-      this.wasmDir = vendorUrl('vendor/mediapipe/wasm');
+      // 源码 / 本机服务模式：**自己下载 wasm 与模型**，再用和单文件版完全相同的方式交给 MediaPipe
+      // （wasmLoaderPath='' + Module.wasmBinary + modelAssetBuffer）。
+      // 为什么不用 MediaPipe 自己的加载：
+      //   ① 它内部是"先加载胶水脚本、再 fetch wasm、再 fetch 模型"，手机上任何一步慢/被拦，
+      //      外面只看到"一直在载入"，**不知道卡在哪**（用户就是在抖音内置浏览器里卡住的）；
+      //   ② 自己下载能显示进度、能单独重试、能给出准确的 HTTP 错误。
+      const simd = supportsSimd();
+      T.simd = simd;
+      const glueName = simd ? 'vision_wasm_internal.js' : 'vision_wasm_nosimd_internal.js';
+      const wasmName = simd ? 'vision_wasm_internal.wasm' : 'vision_wasm_nosimd_internal.wasm';
+      T.glueName = glueName;
+      stage('胶水层', '正在加载运行时（' + (simd ? 'SIMD' : '非 SIMD') + '）…');
+      await loadClassicScript(vendorUrl('vendor/mediapipe/wasm/' + glueName), '运行时胶水层');
+      if (typeof globalThis.ModuleFactory !== 'function') {
+        throw new Error('胶水层加载了但 window.ModuleFactory 没出现：' + glueName);
+      }
+      const wasmBytes = await fetchBytes(vendorUrl('vendor/mediapipe/wasm/' + wasmName), 'wasm', '人脸模型运行时');
+      const modelBytes = await fetchBytes(vendorUrl('vendor/models/face_landmarker.task'), 'model', '人脸模型');
+      globalThis.Module = { wasmBinary: wasmBytes };
+      this.filesetOverride = { wasmLoaderPath: '', wasmBinaryPath: '' };
+      baseOptions = { modelAssetBuffer: modelBytes, delegate: 'GPU' };
+      this.wasmDir = 'vendor/mediapipe/wasm';
     }
     T.decodeEnd = performance.now();
 
@@ -126,17 +235,25 @@ export class FaceTracker {
     if (this.filesetOverride) Object.assign(fileset, this.filesetOverride);
     T.filesetEnd = performance.now();
 
-    // 先试 GPU；部分机器 / 驱动不支持时退回 CPU（慢一些但一定能跑）
+    // 先试 GPU；不支持、报错、或**卡住超过 20 秒**（手机 WebView 上 GPU 上下文申请不到时会一直等）
+    // 都退回 CPU —— 慢一点，但一定能跑。
     T.createStart = performance.now();
+    stage('建任务', '正在初始化人脸模型（GPU）…');
     try {
-      this.landmarker = await FaceLandmarker.createFromOptions(fileset, { ...OPTIONS, baseOptions });
+      this.landmarker = await withTimeout(
+        FaceLandmarker.createFromOptions(fileset, { ...OPTIONS, baseOptions }),
+        20000,
+        'GPU 初始化超时'
+      );
       this.delegate = 'GPU';
     } catch (gpuErr) {
       console.warn('[track] GPU 委托不可用，退回 CPU：', gpuErr);
-      this.landmarker = await FaceLandmarker.createFromOptions(fileset, {
-        ...OPTIONS,
-        baseOptions: { ...baseOptions, delegate: 'CPU' },
-      });
+      stage('建任务', 'GPU 不行，改用 CPU…');
+      this.landmarker = await withTimeout(
+        FaceLandmarker.createFromOptions(fileset, { ...OPTIONS, baseOptions: { ...baseOptions, delegate: 'CPU' } }),
+        30000,
+        'CPU 初始化超时'
+      );
       this.delegate = 'CPU';
     }
     T.createEnd = performance.now();

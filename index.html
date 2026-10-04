@@ -152,6 +152,8 @@
     border-radius: 8px; padding: 8px 10px; margin: 10px 0; text-align: left; word-break: break-all; max-height: 120px; overflow: auto;
   }
   #problem .detail[hidden] { display: none !important; }
+  #problem .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  #problem .row button { margin-top: 12px; }
   #problem button {
     margin-top: 12px; padding: 9px 18px; border-radius: 10px; border: 1px solid var(--panel-line);
     background: rgba(255, 255, 255, 0.1); color: #fff; font: inherit; cursor: pointer;
@@ -183,6 +185,25 @@
     margin-top: 12px; background: none; border: 0; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
   }
   #chooser .skip:hover { color: var(--text); }
+
+  /* ---- 手机 / 窄屏：面板收窄并默认收起，画风选择改单列（原来 2×264px 在手机上会溢出） ---- */
+  @media (max-width: 760px) {
+    #panel { width: min(80vw, 286px); top: 10px; left: 10px; padding: 11px 11px 10px; font-size: 12.5px; max-height: calc(100% - 20px); }
+    #panel.collapsed { width: 148px; }
+    .brand b { font-size: 14px; }
+    .note { font-size: 10.5px; line-height: 1.7; }
+    #chooser .tiles { grid-template-columns: 1fr !important; }
+    #chooser .tile canvas { height: 92px; }
+    #chooser .inner { padding: 16px 14px; max-height: 92vh; overflow: auto; }
+    #problem .inner, #fatal .inner { padding: 16px 14px; }
+    #problem p, #fatal p { font-size: 12.5px; }
+    #problem .detail { max-height: 150px; font-size: 10.5px; }
+    #hint { font-size: 12px; }
+  }
+  /* 手机浏览器地址栏会伸缩：能用 dvh 就别用 vh */
+  @supports (height: 100dvh) {
+    html, body { height: 100dvh; }
+  }
 </style>
 </head>
 <body>
@@ -290,7 +311,10 @@
       <h1 id="problemTitle">出了点问题</h1>
       <p id="problemMsg"></p>
       <div class="detail" id="problemDetail" hidden></div>
-      <button id="problemRetry">重试</button>
+      <div class="row">
+        <button id="problemWait">继续等一会儿</button>
+        <button id="problemRetry">重试</button>
+      </div>
     </div>
   </div>
 
@@ -345,6 +369,28 @@
     });
     var btn = document.getElementById('problemRetry');
     if (btn) btn.onclick = function () { location.reload(); };
+    var waitBtn = document.getElementById('problemWait');
+    if (waitBtn)
+      waitBtn.onclick = function () {
+        var box = document.getElementById('problem');
+        if (box) box.hidden = true; // 关掉提示，后台继续载入
+      };
+
+    /** 手机上没控制台："卡在哪一步"必须显示出来（用户名下那句话就是靠这个定位的） */
+    function stageReport() {
+      var L = window.__fmLoading || {};
+      var T = window.__fmTimings || {};
+      var mb = function (n) { return n == null ? '-' : (n / 1048576).toFixed(2) + 'MB'; };
+      var out = [];
+      out.push('卡在：' + (L.stage || '启动') + (L.note ? ' · ' + L.note : ''));
+      if (L.got != null) out.push('已下载 ' + mb(L.got) + (L.total ? ' / ' + mb(L.total) : '') + '（共约 13 MB）');
+      out.push('wasm ' + mb(T.wasmBytes) + ' · 模型 ' + mb(T.modelBytes) + ' · 胶水 ' + (T.glueName || '-'));
+      out.push('协议 ' + location.protocol + ' · 安全上下文 ' + isSecureContext + ' · 视口 ' + innerWidth + '×' + innerHeight);
+      out.push('UA ' + String(navigator.userAgent).slice(0, 130));
+      out.push(envInfo());
+      return out.join('\n');
+    }
+    window.__fmStageReport = stageReport;
 
     // 面板上显示构建编号：一眼就能看出打开的是哪一版
     document.addEventListener('DOMContentLoaded', function () {
@@ -404,27 +450,33 @@
       }
     }, 6000);
 
-    // 20 秒还没就绪 → 说清楚卡在哪
+    // 45 秒还没就绪 → 把"卡在哪一步"摊开说清楚（手机上没有控制台，这是唯一线索）
+    // 原来 20 秒就报失败，手机上正常下载 13 MB 也可能超过它，属于误报。
     setTimeout(function () {
+      var box = document.getElementById('problem');
+      if (box && !box.hidden) return; // 已经报过具体错误了，别用"还在下载"盖掉它
       if (typeof window.__fm !== 'undefined' && !window.__fmReady) {
-        var b = document.getElementById('bootMsg');
+        var L = window.__fmLoading || {};
+        var stillDownloading = L.stage === '下载';
         showProblem(
-          '模型没有载入完成',
-          '页面脚本跑了，但人脸模型没能就绪。可能是文件不完整（内联资源缺失），' +
-            '或浏览器太旧（需要支持 WebAssembly SIMD 的新版 Edge / Chrome）。<br />' +
-            '按 F12 打开控制台可以看到具体报错。',
-          errs[0] || (b ? b.textContent : '')
+          stillDownloading ? '模型还在下载' : '模型没有载入完成',
+          (stillDownloading
+            ? '手机上第一次打开要下载约 13 MB 的人脸模型。如果一直不动，多半是<b>这个浏览器把资源拦了</b>或者网速太慢。'
+            : '页面脚本是好的，卡住的是下面这一步。<br />若是<b>微信 / 抖音等 App 内置浏览器</b>，' +
+              '点右上角「···」→ <b>在浏览器打开</b>（Safari / Chrome）再试。') +
+            '<br />下面这段"卡在哪"请截图发我。',
+          stageReport()
         );
       }
-    }, 20000);
+    }, 45000);
 
-    // 9 秒的常规提示（正常载入时也可能短暂出现）
+    // 9 秒的常规提示
     setTimeout(function () {
       if (!window.__fmReady && typeof window.__fm !== 'undefined') {
         var tip = document.getElementById('bootTip');
         if (tip) {
           tip.style.display = 'block';
-          tip.textContent = '还在载入… 若长时间停住，按 F12 看控制台报错。';
+          tip.textContent = '手机上第一次打开要下载约 13 MB，稍等一下…';
         }
       }
     }, 9000);

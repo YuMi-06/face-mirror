@@ -21,6 +21,7 @@ const el = {
   video: $('cam'),
   panel: $('panel'),
   boot: $('boot'),
+  bootTitle: $('bootTitle'),
   bootMsg: $('bootMsg'),
   fatal: $('fatal'),
   fatalTitle: $('fatalTitle'),
@@ -1102,14 +1103,29 @@ function envReport() {
     /* 忽略 */
   }
   const nav = performance.getEntriesByType('navigation')[0] || {};
+  const L = window.__fmLoading || {};
+  let simd = '-';
+  try {
+    simd = String(
+      WebAssembly.validate(
+        new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])
+      )
+    );
+  } catch {
+    simd = '不支持';
+  }
+  const mb = (n) => (n == null ? '-' : (n / 1048576).toFixed(2) + 'MB');
   return [
     '构建 ' + (window.__FM_BUILD || '(源码版)'),
-    '协议 ' + location.protocol + ' · 安全上下文 ' + isSecureContext,
+    '阶段 ' + (L.stage || '(未知)') + (L.note ? ' · ' + L.note : '') + (L.got != null ? ` ${mb(L.got)}/${L.total ? mb(L.total) : '?'}` : ''),
+    '下载 wasm ' + mb(T.wasmBytes) + ' / 模型 ' + mb(T.modelBytes) + '（胶水 ' + (T.glueName || '-') + '）',
+    '协议 ' + location.protocol + ' · 安全上下文 ' + isSecureContext + ' · SIMD ' + simd,
     'baseURI ' + String(document.baseURI).slice(0, 70),
     'CSP ' + csp,
     '耗时 解码 ' + ms(T.decodeEnd, T.decodeStart) + ' / fileset ' + ms(T.filesetEnd, T.filesetStart) + ' / 建任务 ' + ms(T.createEnd, T.createStart),
-    '胶水层 ' + (typeof globalThis.ModuleFactory === 'function' ? '就绪' : '未就绪'),
-    '文档 ' + Math.round((nav.domContentLoadedEventEnd || 0)) + 'ms 解析完',
+    '胶水层 ' + (typeof globalThis.ModuleFactory === 'function' ? '就绪' : '未就绪') + ' · 委托 ' + (app?.tracker?.delegate || '-'),
+    '文档 ' + Math.round(nav.domContentLoadedEventEnd || 0) + 'ms 解析完 · 视口 ' + innerWidth + '×' + innerHeight,
+    'UA ' + String(navigator.userAgent).slice(0, 120),
   ].join('\n');
 }
 
@@ -1154,8 +1170,43 @@ function checkWasmAllowed() {
   }
 }
 
+/**
+ * 老手机上 CanvasRenderingContext2D.roundRect 不存在（iOS < 16 / 旧版 WebView），
+ * 缺了它每帧都会抛 TypeError —— 表现就是"页面打开了但一片黑"。5 行补上。
+ */
+function polyfillRoundRect() {
+  const proto = globalThis.CanvasRenderingContext2D && CanvasRenderingContext2D.prototype;
+  if (!proto || typeof proto.roundRect === 'function') return;
+  proto.roundRect = function (x, y, w, h, r) {
+    const rad = typeof r === 'number' ? r : Array.isArray(r) ? r[0] : 0;
+    const rr = Math.max(0, Math.min(rad, Math.abs(w) / 2, Math.abs(h) / 2));
+    this.moveTo(x + rr, y);
+    this.arcTo(x + w, y, x + w, y + h, rr);
+    this.arcTo(x + w, y + h, x, y + h, rr);
+    this.arcTo(x, y + h, x, y, rr);
+    this.arcTo(x, y, x + w, y, rr);
+    this.closePath();
+    return this;
+  };
+}
+
+/** 手机适配：窄屏默认收起面板；触摸时如果摄像头还没起来，再试一次（iOS 要求"用户手势"才给摄像头） */
+function setupMobile() {
+  const touch = (globalThis.matchMedia && matchMedia('(hover: none), (pointer: coarse)').matches) || 'ontouchstart' in window;
+  app.touch = !!touch;
+  if (innerWidth < 760) el.panel.classList.add('collapsed');
+  if (!touch) return;
+  const kick = () => {
+    if (!app.stream && !app.starting) startCamera(app.deviceId || null).catch((err) => reportCameraError(err));
+  };
+  window.addEventListener('touchstart', kick, { passive: true });
+  window.addEventListener('pointerdown', kick);
+}
+
 async function bootInner() {
   loadSettings();
+  polyfillRoundRect();
+  setupMobile();
   resize();
   buildUi();
   requestAnimationFrame(frame);
@@ -1172,8 +1223,18 @@ async function bootInner() {
   let bootTick = 0;
   const bootTimer = setInterval(() => {
     bootTick += 0.1;
-    el.bootMsg.textContent = `${bootTick.toFixed(1)} 秒`;
+    const L = window.__fmLoading || {};
+    // 手机上没控制台：把"当前卡在哪一步 / 下载了多少"直接显示出来
+    if (L.stage) {
+      const mb = (n) => (n / 1048576).toFixed(1);
+      const prog = L.got != null ? ` ${mb(L.got)}${L.total ? ' / ' + mb(L.total) : ''} MB` : '';
+      el.bootTitle.textContent = L.stage + prog;
+      el.bootMsg.textContent = (L.note ? L.note + ' · ' : '') + `${bootTick.toFixed(1)} 秒`;
+    } else {
+      el.bootMsg.textContent = `${bootTick.toFixed(1)} 秒`;
+    }
   }, 100);
+  window.__fmStageHook = () => {}; // 进度已经由上面的定时器读 __fmLoading，这里留个挂钩给外部
   // 摄像头与模型**并行**启动：权限弹窗和出画面都不用等模型
   const cameraPromise = startCamera(null).catch((err) => reportCameraError(err));
   try {
